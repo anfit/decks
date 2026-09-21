@@ -119,8 +119,17 @@ final class ActionService
             'start_session' => self::setStatus($database, $session, $member, 'active'),
             'end_session' => self::setStatus($database, $session, $member, 'ended'),
             'leave_session' => self::leave($database, $member),
+            'instantiate_deck' => self::instantiateDeck($database, $session, $member, $user, $payload),
             default => throw new RuntimeException('Unsupported action type.'),
         };
+    }
+
+    private static function instantiateDeck(PDO $database, array $session, array $member, array $user, array $payload): array
+    {
+        if ($member['role'] !== 'host' || $session['status'] !== 'lobby') throw new RuntimeException('Only the host can configure a lobby.');
+        $versionId = (string) ($payload['template_version_id'] ?? '');
+        if (!preg_match('/^[0-9a-fA-F-]{36}$/', $versionId)) throw new RuntimeException('A template version is required.');
+        return DeckService::instantiate($database, $session, $user, $versionId, isset($payload['label']) ? (string) $payload['label'] : null);
     }
 
     private static function setStatus(PDO $database, array $session, array $member, string $status): array

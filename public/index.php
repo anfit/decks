@@ -6,10 +6,12 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 
 use Decks\InvitationService;
 use Decks\ActionService;
+use Decks\AssetService;
 use Decks\PasswordResetService;
 use Decks\RememberMe;
 use Decks\Security;
 use Decks\SessionService;
+use Decks\TemplateService;
 use function Decks\env_required;
 use function Decks\csrf_token;
 use function Decks\database;
@@ -154,6 +156,25 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
     }
 }
 
+if (preg_match('#^/protected-assets/([0-9a-fA-F-]{36})$#', $path, $matches)) {
+    start_secure_session();
+    $database = database();
+    $user = Security::currentUser($database);
+    if ($user === null) { http_response_code(404); exit; }
+    try {
+        $asset = AssetService::pathForOwner($database, $user, $matches[1]);
+        header('Content-Type: ' . $asset['mime_type']);
+        header('Cache-Control: private, no-store');
+        $prefix = getenv('DECKS_ASSET_HANDOFF_PREFIX');
+        if (is_string($prefix) && $prefix !== '') {
+            header('X-Accel-Redirect: ' . rtrim($prefix, '/') . '/' . basename($asset['storage_key']));
+            exit;
+        }
+        readfile($asset['path']);
+        exit;
+    } catch (Throwable) { http_response_code(404); exit; }
+}
+
 if (str_starts_with($path, '/api/')) {
     start_secure_session();
     $database = database();
@@ -185,6 +206,18 @@ if (str_starts_with($path, '/api/')) {
     if ($user === null) json_response(['error' => 'authentication_required'], 401);
     try {
         if ($method === 'POST') require_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
+        if ($path === '/api/assets' && $method === 'POST') {
+            if (!isset($_FILES['asset']) || !is_array($_FILES['asset'])) json_response(['error' => 'asset_required'], 400);
+            json_response(['asset' => AssetService::storeUpload($database, $user, $_FILES['asset'])], 201);
+        }
+        if ($path === '/api/templates' && $method === 'POST') {
+            $body = json_body();
+            json_response(['template' => TemplateService::create($database, $user, (string) ($body['name'] ?? ''))], 201);
+        }
+        if (preg_match('#^/api/templates/([0-9a-fA-F-]{36})/versions$#', $path, $matches) && $method === 'POST') {
+            $body = json_body();
+            json_response(['version' => TemplateService::createVersion($database, $user, $matches[1], is_array($body['definitions'] ?? null) ? $body['definitions'] : [])], 201);
+        }
         if ($path === '/api/sessions' && $method === 'POST') {
             $body = json_body();
             $created = SessionService::create($database, $user, isset($body['title']) ? (string) $body['title'] : null, isset($body['max_participants']) ? (int) $body['max_participants'] : 12);

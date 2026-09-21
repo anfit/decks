@@ -1,0 +1,9 @@
+# Decks table interaction contract
+
+Status: initial contract, 2026-09-21.
+
+The first client uses ordinary DOM elements inside a transformable table. Pointer Events drive local drag previews; pointer release submits one durable action. Every essential drag operation has an action-menu alternative. Pan/zoom, selection, rotation, z-order, keyboard focus, touch-sized controls and reduced motion are presentation concerns; final position and containment are server state.
+
+Table cards support public face-up, public face-down and private hand projection. A hand exposes identities only to its owner. Public overlap never silently creates a pile; stacking is an explicit action. Pending actions and rejected conflicts remain visually distinct from accepted state.
+
+The initial operation family is shuffle, draw top/bottom/N, move table card, rotate, flip/turn face, move to own hand, play from own hand face-up/down and return selected cards to deck top/bottom. Piles, group selection, zones and additional operations follow later specs.
