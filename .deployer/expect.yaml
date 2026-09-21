@@ -1,10 +1,10 @@
 commands:
   bash: {}
   node:
-    version: ">=24.21"
+    version: ">=22.22"
   php:
     version: ">=8.2"
-  php-fpm8.4: {}
+  php-fpm8.5: {}
   psql:
     version: ">=18"
 paths:
