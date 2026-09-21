@@ -1,9 +1,10 @@
 commands:
   bash: {}
   node:
-    version: ">=20.20"
+    version: ">=20.19"
   php:
     version: ">=8.2"
+  php-fpm8.4: {}
   psql: {}
 paths:
   - /etc/nginx
