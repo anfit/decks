@@ -159,6 +159,36 @@ final class CardService
         return ['card_id'=>(string)$card['id'],'locked'=>$locked];
     }
 
+    public static function moveCards(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member); $items = $payload['cards'] ?? [];
+        if (!is_array($items) || count($items) < 1 || count($items) > 100) throw new RuntimeException('Card selection is invalid.');
+        $update = $database->prepare('UPDATE session_cards SET x=:x, y=:y, rotation=:rotation, z_index=:z, version=version+1 WHERE id=:id'); $moved=[];
+        foreach ($items as $item) {
+            if (!is_array($item)) throw new RuntimeException('Card selection is invalid.');
+            $card=self::card($database,$session['id'],(string)($item['card_id']??'')); self::assertVersion($card,$item); self::assertCanControl($card,$member); if($card['location_type']!=='table') throw new RuntimeException('Only table cards can move as a group.');
+            $update->execute(['x'=>(float)($item['x']??$card['x']),'y'=>(float)($item['y']??$card['y']),'rotation'=>(float)($item['rotation']??$card['rotation']),'z'=>(int)($item['z_index']??$card['z_index']),'id'=>$card['id']]); $moved[]=(string)$card['id'];
+        }
+        return ['card_ids'=>$moved,'count'=>count($moved)];
+    }
+
+    public static function reorderHand(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session,$member); $ids=$payload['card_ids']??[]; if(!is_array($ids)||count($ids)>100)throw new RuntimeException('Card selection is invalid.');
+        $all=$database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='hand' AND hand_participant_id=:participant ORDER BY order_key,id FOR UPDATE");$all->execute(['session'=>$session['id'],'participant'=>$member['id']]);$owned=array_map(static fn(array $r):string=>(string)$r['id'],$all->fetchAll());$requested=array_values(array_unique(array_map('strval',$ids)));if($requested!==$owned)throw new RuntimeException('The hand changed; refresh and try again.');
+        $update=$database->prepare('UPDATE session_cards SET order_key=:order, version=version+1 WHERE id=:id');foreach($requested as $i=>$id)$update->execute(['order'=>($i+1)*1000,'id'=>$id]);self::bumpHand($database,$session['id'],(string)$member['id']);return ['participant_id'=>(string)$member['id'],'card_count'=>count($requested)];
+    }
+
+    public static function giveCards(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session,$member);$recipient=(string)($payload['recipient_participant_id']??'');$target=$database->prepare("SELECT id FROM session_participants WHERE session_id=:session AND id=:id AND removed_at IS NULL AND role IN ('host','player')");$target->execute(['session'=>$session['id'],'id'=>$recipient]);if(!$target->fetch())throw new RuntimeException('Recipient is invalid.');$ids=$payload['card_ids']??[];if(!is_array($ids)||count($ids)<1||count($ids)>100)throw new RuntimeException('Card selection is invalid.');$versions=is_array($payload['expected_card_versions']??null)?$payload['expected_card_versions']:[];$order=self::nextOrder($database,$session['id'],'hand',$recipient);$update=$database->prepare("UPDATE session_cards SET hand_participant_id=:participant,order_key=:order,face_state='private',version=version+1 WHERE id=:id");$moved=[];foreach($ids as $index=>$id){$card=self::card($database,$session['id'],(string)$id);if(array_key_exists((string)$id,$versions))self::assertVersion($card,['expected_card_version'=>$versions[(string)$id]]);if($card['location_type']!=='hand'||(string)$card['hand_participant_id']!==(string)$member['id'])throw new RuntimeException('Only your own hand cards can be given.');$update->execute(['participant'=>$recipient,'order'=>$order+(($index+1)*1000),'id'=>$card['id']]);$moved[]=(string)$card['id'];}self::normalizeHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],$recipient);return ['recipient_participant_id'=>$recipient,'card_count'=>count($moved)];
+    }
+
+    public static function peek(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session,$member);$card=self::card($database,$session['id'],(string)($payload['card_id']??''));if(!in_array($card['location_type'],['table','pile'],true)||$card['face_state']==='up')throw new RuntimeException('Only a face-down table or pile card can be peeked.');self::assertCanControl($card,$member);Security::audit($database,(string)$member['user_id'],'card.peek','session_card',(string)$card['id']);return ['card_id'=>(string)$card['id'],'card_definition_id'=>(string)$card['card_definition_id'],'expires_in_seconds'=>30];
+    }
+
     public static function moveCard(PDO $database, array $session, array $member, array $payload): array
     {
         self::assertPlayer($session, $member);
