@@ -4,3 +4,4 @@ vendor/
 public/assets-build/
 .env
 .env.*
+!.env.example
