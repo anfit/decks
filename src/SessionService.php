@@ -136,6 +136,47 @@ final class SessionService
         }
     }
 
+    public static function transferHost(PDO $database, array $session, array $member, array $payload): array
+    {
+        if (($member['role'] ?? null) !== 'host') throw new RuntimeException('Host permission required.');
+        $targetId = (string) ($payload['participant_id'] ?? '');
+        $target = $database->prepare("SELECT id, user_id, role FROM session_participants WHERE session_id = :session AND id = :id AND removed_at IS NULL AND role IN ('player','spectator') FOR UPDATE");
+        $target->execute(['session' => $session['id'], 'id' => $targetId]);
+        $row = $target->fetch();
+        if (!is_array($row)) throw new RuntimeException('Host transfer target is invalid.');
+        $database->prepare("UPDATE session_participants SET role = 'player' WHERE session_id = :session AND role = 'host'")->execute(['session' => $session['id']]);
+        $database->prepare("UPDATE session_participants SET role = 'host' WHERE session_id = :session AND id = :target")->execute(['session' => $session['id'], 'target' => $targetId]);
+        $database->prepare('INSERT INTO session_hands(session_id, participant_id) VALUES (:session, :participant) ON CONFLICT DO NOTHING')->execute(['session' => $session['id'], 'participant' => $targetId]);
+        $database->prepare('UPDATE sessions SET host_user_id = :user WHERE id = :session')->execute(['user' => $row['user_id'], 'session' => $session['id']]);
+        Security::audit($database, (string) $member['user_id'], 'session.host_transferred', 'session_participant', $targetId, ['session_id' => (string) $session['id']]);
+        return ['participant_id' => $targetId, 'host_user_id' => (string) $row['user_id']];
+    }
+
+    public static function removeParticipant(PDO $database, array $session, array $member, array $payload): array
+    {
+        if (($member['role'] ?? null) !== 'host') throw new RuntimeException('Host permission required.');
+        $targetId = (string) ($payload['participant_id'] ?? '');
+        if ($targetId === (string) $member['id']) throw new RuntimeException('The host cannot remove themself.');
+        $target = $database->prepare("UPDATE session_participants SET removed_at = now() WHERE session_id = :session AND id = :id AND removed_at IS NULL AND role <> 'host'");
+        $target->execute(['session' => $session['id'], 'id' => $targetId]);
+        if ($target->rowCount() !== 1) throw new RuntimeException('Participant not found.');
+        Security::audit($database, (string) $member['user_id'], 'session.participant_removed', 'session_participant', $targetId, ['session_id' => (string) $session['id']]);
+        return ['participant_id' => $targetId, 'removed' => true];
+    }
+
+    public static function restoreParticipant(PDO $database, array $session, array $member, array $payload): array
+    {
+        if (($member['role'] ?? null) !== 'host') throw new RuntimeException('Host permission required.');
+        $targetId = (string) ($payload['participant_id'] ?? '');
+        $role = ($payload['role'] ?? 'player') === 'spectator' ? 'spectator' : 'player';
+        $target = $database->prepare('UPDATE session_participants SET removed_at = NULL, role = :role WHERE session_id = :session AND id = :id AND removed_at IS NOT NULL');
+        $target->execute(['role' => $role, 'session' => $session['id'], 'id' => $targetId]);
+        if ($target->rowCount() !== 1) throw new RuntimeException('Removed participant not found.');
+        if ($role === 'player') $database->prepare('INSERT INTO session_hands(session_id, participant_id) VALUES (:session, :participant) ON CONFLICT DO NOTHING')->execute(['session' => $session['id'], 'participant' => $targetId]);
+        Security::audit($database, (string) $member['user_id'], 'session.participant_restored', 'session_participant', $targetId, ['session_id' => (string) $session['id'], 'role' => $role]);
+        return ['participant_id' => $targetId, 'restored' => true, 'role' => $role];
+    }
+
     private static function lockedMembership(PDO $database, string $sessionId, string $userId): ?array
     {
         $statement = $database->prepare('SELECT p.*, s.status FROM session_participants p JOIN sessions s ON s.id = p.session_id WHERE p.session_id = :session AND p.user_id = :user AND p.removed_at IS NULL FOR UPDATE OF p, s');
