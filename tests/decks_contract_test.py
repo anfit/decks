@@ -25,6 +25,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("request.headers.origin", source)
         self.assertIn("authorizationCheck", source)
         self.assertIn("maintainListener", source)
+        self.assertIn("Number(payload.exp) < Math.floor(Date.now() / 1000)", source)
 
     def test_changes_endpoint_never_replays_raw_action_payloads(self) -> None:
         source = read_text("src/ActionService.php")

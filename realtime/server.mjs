@@ -97,7 +97,7 @@ wss.on("connection", (socket, payload) => {
   clients.add(socket);
   socket.send(JSON.stringify({ type: "ready", session_id: payload.session_id }));
   const heartbeat = setInterval(() => { if (socket.readyState === 1) socket.ping(); }, 30000);
-  const authorizationCheck = setInterval(async () => { if (socket.readyState === 1 && !(await authorized(payload))) socket.close(4003, "revoked"); }, 30000);
+  const authorizationCheck = setInterval(async () => { if (socket.readyState === 1 && (Number(payload.exp) < Math.floor(Date.now() / 1000) || !(await authorized(payload)))) socket.close(4003, "revoked"); }, 30000);
   socket.on("message", (data) => {
     const now = Date.now();
     socket.messages = socket.messages.filter((at) => now - at < 1000);
