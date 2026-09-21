@@ -29,7 +29,7 @@ Duplicate `(session, actor, action_id)` with the same request hash returns the o
 
 ## Initial action registry
 
-S05/S07 implement `create_session`, `join_session`, `leave_session`, `start_session`, `end_session`, `move_card`, `rotate_card`, `flip_card`, `turn_face_up`, `turn_face_down`, `draw_top`, `draw_bottom`, `draw_n`, `return_top`, `return_bottom`, `shuffle_deck`, `move_to_hand`, `play_from_hand`, `create_pile`, `move_pile`, and `reset_session` as the first families. S09/S12 extend piles, deal, insert/cut/split/merge, group actions, zones, transfer/give/peek and neutral undo under separate task specs.
+S05/S07 implement `create_session`, `join_session`, `leave_session`, `start_session`, `end_session`, `move_card`, `rotate_card`, `flip_card`, `turn_face_up`, `turn_face_down`, `draw_top`, `draw_bottom`, `draw_n`, `return_top`, `return_bottom`, `shuffle_deck`, `move_to_hand`, `play_from_hand`, `create_pile`, `move_pile`, and `reset_session` as the first families. The current registry also provides atomic `deal`, `cut_deck`, `insert_cards`, `split_deck`, `reverse_pile`, `flip_pile`, `collect_all`, `shuffle_pile`, and pile-to-deck merge actions. S09/S12 continue with zones, transfer/give/peek and neutral undo under separate task specs.
 
 Actions that reveal hidden state or change randomness have no unilateral undo. Spatial/public actions may later support dependency-checked inverse actions.
 

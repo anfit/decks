@@ -2,6 +2,8 @@
 
 Status: initial contract, 2026-09-21.
 
+State snapshots expose container counts and authorized visible cards. Deck rows, removed cards, other players' hands, and face-down pile cards are represented only by counts or omitted; a viewer receives card definitions for their own hand and public face-up cards. Changes return sanitized revision/action metadata and a fresh authorized snapshot rather than replaying raw action payloads.
+
 ## HTTP state
 
 - `GET /api/sessions/{id}/state` returns the requesting account's current authorized projection and `revision`.
