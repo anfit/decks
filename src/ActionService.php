@@ -120,6 +120,15 @@ final class ActionService
             'end_session' => self::setStatus($database, $session, $member, 'ended'),
             'leave_session' => self::leave($database, $member),
             'instantiate_deck' => self::instantiateDeck($database, $session, $member, $user, $payload),
+            'draw_top' => CardService::draw($database, $session, $member, 'top', $payload),
+            'draw_bottom' => CardService::draw($database, $session, $member, 'bottom', $payload),
+            'draw_n' => CardService::draw($database, $session, $member, (($payload['direction'] ?? 'top') === 'bottom' ? 'bottom' : 'top'), $payload),
+            'shuffle_deck' => CardService::shuffle($database, $session, $member, $payload),
+            'move_card' => CardService::moveCard($database, $session, $member, $payload),
+            'flip_card', 'turn_face_up', 'turn_face_down' => CardService::face($database, $session, $member, $type, $payload),
+            'move_to_hand' => CardService::moveToHand($database, $session, $member, $payload),
+            'play_from_hand' => CardService::playFromHand($database, $session, $member, $payload),
+            'return_top', 'return_bottom' => CardService::returnToDeck($database, $session, $member, $payload, $type === 'return_top' ? 'top' : 'bottom'),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }

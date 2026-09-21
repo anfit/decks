@@ -1,0 +1,243 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Decks;
+
+use PDO;
+use RuntimeException;
+
+final class CardService
+{
+    public static function draw(PDO $database, array $session, array $member, string $direction, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $deckId = (string) ($payload['deck_id'] ?? '');
+        $count = (int) ($payload['count'] ?? 1);
+        if ($count < 1 || $count > 100) throw new RuntimeException('Draw count is invalid.');
+        $target = (string) ($payload['target'] ?? 'table');
+        if (!in_array($target, ['table', 'hand', 'pile'], true)) throw new RuntimeException('Draw target is invalid.');
+        $deck = self::deck($database, $session['id'], $deckId);
+        $order = $direction === 'bottom' ? 'DESC' : 'ASC';
+        $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key {$order} LIMIT {$count} FOR UPDATE");
+        $cards->execute(['session' => $session['id'], 'deck' => $deckId]);
+        $selected = $cards->fetchAll();
+        if (count($selected) < $count) throw new RuntimeException('The deck does not contain enough cards.');
+        $targetPile = null;
+        if ($target === 'pile') $targetPile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
+        $nextOrder = $target === 'hand' ? self::nextOrder($database, $session['id'], 'hand', (string) $member['id']) : ($target === 'pile' ? self::nextOrder($database, $session['id'], 'pile', (string) $targetPile['id']) : 0);
+        $update = $database->prepare(
+            "UPDATE session_cards SET location_type = :location, deck_id = NULL, pile_id = :pile, hand_participant_id = :hand,
+             order_key = :order_key, x = :x, y = :y, face_state = :face_state, version = version + 1
+             WHERE id = :id",
+        );
+        $drawn = [];
+        foreach ($selected as $index => $card) {
+            $location = $target === 'table' ? 'table' : $target;
+            $face = $target === 'hand' ? 'private' : (($payload['face_state'] ?? 'down') === 'up' ? 'up' : 'down');
+            $update->execute([
+                'location' => $location, 'pile' => $target === 'pile' ? $targetPile['id'] : null, 'hand' => $target === 'hand' ? $member['id'] : null,
+                'order_key' => $target === 'table' ? null : $nextOrder + ($index + 1) * 1000,
+                'x' => $target === 'table' ? (float) ($payload['x'] ?? 0) + $index * 24 : null,
+                'y' => $target === 'table' ? (float) ($payload['y'] ?? 0) + $index * 24 : null,
+                'face_state' => $face, 'id' => $card['id'],
+            ]);
+            $drawn[] = ['id' => (string) $card['id'], 'location_type' => $location, 'face_state' => $face];
+        }
+        self::bumpDeck($database, $deckId);
+        if ($target === 'hand') self::bumpHand($database, $session['id'], (string) $member['id']);
+        if ($target === 'pile') self::bumpPile($database, $targetPile['id']);
+        return ['deck_id' => $deckId, 'direction' => $direction, 'cards' => $drawn];
+    }
+
+    public static function shuffle(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $deckId = (string) ($payload['deck_id'] ?? '');
+        self::deck($database, $session['id'], $deckId);
+        $statement = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key FOR UPDATE");
+        $statement->execute(['session' => $session['id'], 'deck' => $deckId]);
+        $cards = $statement->fetchAll();
+        for ($index = count($cards) - 1; $index > 0; $index--) {
+            $swap = random_int(0, $index);
+            [$cards[$index], $cards[$swap]] = [$cards[$swap], $cards[$index]];
+        }
+        self::assignOrder($database, $cards);
+        self::bumpDeck($database, $deckId);
+        return ['deck_id' => $deckId, 'card_count' => count($cards), 'randomized' => true];
+    }
+
+    public static function moveCard(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        self::assertVersion($card, $payload);
+        self::assertCanControl($card, $member);
+        if (!in_array($card['location_type'], ['table', 'hand'], true)) throw new RuntimeException('Only table or own-hand cards can change face state.');
+        if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards have spatial positions.');
+        $database->prepare('UPDATE session_cards SET x = :x, y = :y, rotation = :rotation, z_index = :z, version = version + 1 WHERE id = :id')
+            ->execute(['x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y']), 'rotation' => (float) ($payload['rotation'] ?? $card['rotation']), 'z' => (int) ($payload['z_index'] ?? $card['z_index']), 'id' => $card['id']]);
+        return ['card_id' => (string) $card['id'], 'x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y'])];
+    }
+
+    public static function face(PDO $database, array $session, array $member, string $operation, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        self::assertVersion($card, $payload);
+        self::assertCanControl($card, $member);
+        $face = match ($operation) {
+            'flip_card' => $card['face_state'] === 'up' ? 'down' : 'up',
+            'turn_face_up' => 'up',
+            'turn_face_down' => 'down',
+            default => throw new RuntimeException('Invalid face operation.'),
+        };
+        $database->prepare('UPDATE session_cards SET face_state = :face, version = version + 1 WHERE id = :id')->execute(['face' => $face, 'id' => $card['id']]);
+        return ['card_id' => (string) $card['id'], 'face_state' => $face];
+    }
+
+    public static function moveToHand(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        self::assertVersion($card, $payload);
+        self::assertCanControl($card, $member);
+        if (!in_array($card['location_type'], ['table', 'pile'], true)) throw new RuntimeException('Only table or pile cards can move to a hand.');
+        $order = self::nextOrder($database, $session['id'], 'hand', (string) $member['id']) + 1000;
+        $database->prepare("UPDATE session_cards SET location_type = 'hand', deck_id = NULL, pile_id = NULL, hand_participant_id = :hand, order_key = :order_key, x = NULL, y = NULL, face_state = 'private', version = version + 1 WHERE id = :id")
+            ->execute(['hand' => $member['id'], 'order_key' => $order, 'id' => $card['id']]);
+        self::bumpHand($database, $session['id'], (string) $member['id']);
+        return ['card_id' => (string) $card['id'], 'hand_participant_id' => (string) $member['id']];
+    }
+
+    public static function playFromHand(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        self::assertVersion($card, $payload);
+        if ($card['location_type'] !== 'hand' || (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('Only your own hand cards can be played.');
+        $face = ($payload['face_state'] ?? 'down') === 'up' ? 'up' : 'down';
+        $database->prepare("UPDATE session_cards SET location_type = 'table', deck_id = NULL, pile_id = NULL, hand_participant_id = NULL, order_key = NULL, x = :x, y = :y, face_state = :face, version = version + 1 WHERE id = :id")
+            ->execute(['x' => (float) ($payload['x'] ?? 0), 'y' => (float) ($payload['y'] ?? 0), 'face' => $face, 'id' => $card['id']]);
+        self::normalizeHand($database, $session['id'], (string) $member['id']);
+        self::bumpHand($database, $session['id'], (string) $member['id']);
+        return ['card_id' => (string) $card['id'], 'face_state' => $face];
+    }
+
+    public static function returnToDeck(PDO $database, array $session, array $member, array $payload, string $position): array
+    {
+        self::assertPlayer($session, $member);
+        $deckId = (string) ($payload['deck_id'] ?? '');
+        self::deck($database, $session['id'], $deckId);
+        $ids = $payload['card_ids'] ?? [];
+        if (!is_array($ids) || count($ids) < 1 || count($ids) > 100) throw new RuntimeException('Card selection is invalid.');
+        $moving = [];
+        foreach ($ids as $id) {
+            $card = self::card($database, $session['id'], (string) $id);
+            self::assertCanControl($card, $member);
+            $moving[] = $card;
+        }
+        $sourceContainers = [];
+        foreach ($moving as $index => $card) {
+            if ($card['location_type'] === 'deck') throw new RuntimeException('Cards already in a deck cannot be selected by identity.');
+            $sourceContainers[$card['location_type'] . ':' . ($card['pile_id'] ?? $card['hand_participant_id'] ?? $card['deck_id'] ?? '')] = true;
+            $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = :deck, pile_id = NULL, hand_participant_id = NULL, order_key = :temp_order, x = NULL, y = NULL, face_state = 'down', version = version + 1 WHERE id = :id")
+                ->execute(['deck' => $deckId, 'temp_order' => -1000000 + $index, 'id' => $card['id']]);
+        }
+        $all = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key");
+        $all->execute(['session' => $session['id'], 'deck' => $deckId]);
+        $ordered = $all->fetchAll();
+        $movingIds = array_map(static fn (array $card): string => (string) $card['id'], $moving);
+        $movingRows = []; $remainingRows = [];
+        foreach ($ordered as $row) {
+            if (in_array((string) $row['id'], $movingIds, true)) $movingRows[] = $row;
+            else $remainingRows[] = $row;
+        }
+        $ordered = $position === 'top' ? array_merge($movingRows, $remainingRows) : array_merge($remainingRows, $movingRows);
+        self::assignOrder($database, $ordered);
+        foreach ($sourceContainers as $key => $_) {
+            [$location, $container] = explode(':', $key, 2);
+            if ($location === 'hand') self::normalizeHand($database, $session['id'], $container);
+            if ($location === 'pile' && $container !== '') self::normalizePile($database, $session['id'], $container);
+        }
+        self::bumpDeck($database, $deckId);
+        return ['deck_id' => $deckId, 'position' => $position, 'card_ids' => $movingIds];
+    }
+
+    private static function assertPlayer(array $session, array $member): void
+    {
+        if (!in_array($member['role'], ['host', 'player'], true)) throw new RuntimeException('Player permission required.');
+        if ($session['status'] === 'ended') throw new RuntimeException('Session has ended.');
+    }
+
+    private static function assertVersion(array $card, array $payload): void
+    {
+        if (isset($payload['expected_card_version']) && (int) $payload['expected_card_version'] !== (int) $card['version']) throw new RuntimeException('Card changed; refresh and try again.');
+    }
+
+    private static function assertCanControl(array $card, array $member): void
+    {
+        if ($card['location_type'] === 'hand' && (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('That hand is private.');
+        if ($card['location_type'] === 'pile' && $card['face_state'] === 'private') throw new RuntimeException('That pile card is private.');
+        if ($card['locked_by'] !== null && (string) $card['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.');
+        if ($card['location_type'] === 'removed') throw new RuntimeException('That card is removed from play.');
+    }
+
+    private static function card(PDO $database, string $sessionId, string $cardId): array
+    {
+        $statement = $database->prepare('SELECT * FROM session_cards WHERE session_id = :session AND id = :id FOR UPDATE');
+        $statement->execute(['session' => $sessionId, 'id' => $cardId]);
+        $card = $statement->fetch();
+        if (!is_array($card)) throw new RuntimeException('Card not found.');
+        return $card;
+    }
+
+    private static function deck(PDO $database, string $sessionId, string $deckId): array
+    {
+        $statement = $database->prepare('SELECT * FROM session_decks WHERE session_id = :session AND id = :id FOR UPDATE');
+        $statement->execute(['session' => $sessionId, 'id' => $deckId]);
+        $deck = $statement->fetch();
+        if (!is_array($deck)) throw new RuntimeException('Deck not found.');
+        return $deck;
+    }
+
+    private static function pile(PDO $database, string $sessionId, string $pileId): array
+    {
+        $statement = $database->prepare('SELECT * FROM session_piles WHERE session_id = :session AND id = :id FOR UPDATE');
+        $statement->execute(['session' => $sessionId, 'id' => $pileId]);
+        $pile = $statement->fetch();
+        if (!is_array($pile)) throw new RuntimeException('Pile not found.');
+        return $pile;
+    }
+
+    private static function nextOrder(PDO $database, string $sessionId, string $location, string $containerId): int
+    {
+        $field = match ($location) { 'hand' => 'hand_participant_id', 'pile' => 'pile_id', default => throw new RuntimeException('Invalid order container.') };
+        $statement = $database->prepare("SELECT coalesce(max(order_key), 0) FROM session_cards WHERE session_id = :session AND location_type = :location AND {$field} = :container");
+        $statement->execute(['session' => $sessionId, 'location' => $location, 'container' => $containerId]);
+        return (int) $statement->fetchColumn();
+    }
+
+    private static function assignOrder(PDO $database, array $cards): void
+    {
+        $update = $database->prepare('UPDATE session_cards SET order_key = :temporary WHERE id = :id');
+        foreach ($cards as $index => $card) $update->execute(['temporary' => -2000000000 + $index, 'id' => $card['id']]);
+        foreach ($cards as $index => $card) $update->execute(['temporary' => ($index + 1) * 1000, 'id' => $card['id']]);
+    }
+
+    private static function normalizeHand(PDO $database, string $sessionId, string $participantId): void
+    {
+        $statement = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'hand' AND hand_participant_id = :participant ORDER BY order_key, id");
+        $statement->execute(['session' => $sessionId, 'participant' => $participantId]); self::assignOrder($database, $statement->fetchAll());
+    }
+
+    private static function normalizePile(PDO $database, string $sessionId, string $pileId): void
+    {
+        $statement = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key, id");
+        $statement->execute(['session' => $sessionId, 'pile' => $pileId]); self::assignOrder($database, $statement->fetchAll());
+    }
+
+    private static function bumpDeck(PDO $database, string $deckId): void { $database->prepare('UPDATE session_decks SET version = version + 1 WHERE id = :id')->execute(['id' => $deckId]); }
+    private static function bumpHand(PDO $database, string $sessionId, string $participantId): void { $database->prepare('UPDATE session_hands SET version = version + 1 WHERE session_id = :session AND participant_id = :participant')->execute(['session' => $sessionId, 'participant' => $participantId]); }
+    private static function bumpPile(PDO $database, string $pileId): void { $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pileId]); }
+}
