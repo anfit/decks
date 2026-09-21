@@ -13,6 +13,7 @@ Decks gets its own database, cookies, users, credentials, SMTP account, sender i
 - Users are named local accounts. Email is the case-insensitive unique login/contact identifier for invited accounts.
 - No public registration. A private CLI bootstrap creates the first enabled administrator.
 - Passwords use PHP's `PASSWORD_DEFAULT` hashes, `password_verify`, rehash when needed, and Scholion's 16 Unicode character minimum / 4096-byte maximum for new passwords.
+- Temporary migration compatibility: the private bootstrap accepts `DECKS_ADMIN_PASSWORD_HASH` so an operator can reuse an existing Special/Scholion `PASSWORD_DEFAULT` administrator credential without handling plaintext. This is a one-time operator shortcut; change the Decks password after the first sign-in and remove the hash from the process environment.
 - Browser authentication uses a server-side PHP session with a Decks-specific cookie, `HttpOnly`, `Secure` under HTTPS and `SameSite=Strict`. Successful login regenerates the session ID and only accepts a local absolute return path.
 - Remember-me is opt-in or default according to the product UI decision, with a 60-day default configurable from 1–3650 days. Store a random selector plus a hash of a high-entropy secret; rotate on restoration under row lock; revoke on logout/password changes/reset/disablement.
 - Re-resolve the current enabled user and permissions on every protected request. Account role changes take effect without waiting for token expiry.
