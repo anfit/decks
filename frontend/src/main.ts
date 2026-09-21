@@ -2,7 +2,8 @@ import "./styles.css";
 
 type User = { id: string; email: string; role: string };
 type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
-type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; cards: Array<{ id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null }> };
+type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
+type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -84,9 +85,85 @@ function renderTable(state: State): void {
     controls.append(button("Shuffle", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.deck_id }), true));
   }
   workspace.append(controls);
+  renderBoard(state);
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);
   connectRealtime(state.session.id);
   setStatus("Connected", "ok");
+}
+
+function renderBoard(state: State): void {
+  if (!workspace) return;
+  const board = document.createElement("section");
+  board.className = "table-view";
+  board.setAttribute("aria-label", "Table cards");
+  const heading = document.createElement("h3"); heading.textContent = "Table"; board.append(heading);
+  const surface = document.createElement("div"); surface.className = "table-surface";
+  const cards = state.cards.filter((card) => card.location_type === "table");
+  if (cards.length === 0) {
+    const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; surface.append(empty);
+  }
+  cards.forEach((card, index) => surface.append(renderCard(card, index)));
+  board.append(surface);
+
+  const currentParticipant = state.participants.find((participant) => participant.is_current);
+  const handCards = currentParticipant ? state.cards.filter((card) => card.location_type === "hand" && card.hand_participant_id === currentParticipant.id) : [];
+  const hand = document.createElement("div"); hand.className = "hand-tray";
+  const handHeading = document.createElement("h3"); handHeading.textContent = `Your hand (${handCards.length})`; hand.append(handHeading);
+  const handRow = document.createElement("div"); handRow.className = "hand-cards";
+  if (handCards.length === 0) {
+    const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Your hand is empty."; handRow.append(empty);
+  }
+  handCards.forEach((card, index) => {
+    const item = renderCard(card, index, true);
+    const play = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
+    item.append(play);
+    handRow.append(item);
+  });
+  hand.append(handRow); board.append(hand);
+  workspace.append(board);
+}
+
+function renderCard(card: Card, index: number, inHand = false): HTMLElement {
+  const item = document.createElement("article");
+  item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
+  item.dataset.cardId = card.id;
+  item.style.zIndex = String(card.z_index || index + 1);
+  const x = card.x ?? 24 + (index % 8) * 74;
+  const y = card.y ?? 24 + Math.floor(index / 8) * 28;
+  if (!inHand) {
+    item.style.left = `${x}px`; item.style.top = `${y}px`; item.style.transform = `rotate(${card.rotation || 0}deg)`;
+    item.title = "Drag to move. Double click to turn the card.";
+    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;
+    item.addEventListener("pointerdown", (event) => {
+      item.setPointerCapture(event.pointerId);
+      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: x, startY: y, moved: false };
+      item.classList.add("dragging");
+    });
+    item.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const nextX = drag.startX + event.clientX - drag.pointerX;
+      const nextY = drag.startY + event.clientY - drag.pointerY;
+      if (Math.abs(nextX - drag.startX) + Math.abs(nextY - drag.startY) > 4) drag.moved = true;
+      item.style.left = `${Math.max(0, nextX)}px`; item.style.top = `${Math.max(0, nextY)}px`;
+    });
+    item.addEventListener("pointerup", (event) => {
+      if (!drag) return;
+      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
+      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
+      const moved = drag.moved; drag = null; item.classList.remove("dragging");
+      if (moved) void action(statefulSessionId(), "move_card", { card_id: card.id, x: nextX, y: nextY, rotation: card.rotation, z_index: card.z_index, expected_card_version: card.version });
+    });
+    item.addEventListener("dblclick", () => void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }));
+  }
+  const label = document.createElement("strong");
+  label.textContent = card.card_definition_id ? `Card ${card.card_definition_id.slice(0, 8)}` : (card.face_state === "private" ? "Private card" : "Face down");
+  item.append(label);
+  return item;
+}
+
+function statefulSessionId(): string {
+  if (!currentState) throw new Error("No table is open.");
+  return currentState.session.id;
 }
 
 async function action(sessionId: string, type: string, payload: Record<string, unknown>): Promise<void> {
