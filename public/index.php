@@ -4,7 +4,15 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
+use Decks\InvitationService;
+use Decks\PasswordResetService;
+use Decks\RememberMe;
+use Decks\Security;
 use function Decks\env_required;
+use function Decks\csrf_token;
+use function Decks\database;
+use function Decks\require_csrf;
+use function Decks\start_secure_session;
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -17,6 +25,131 @@ if ($path === '/health') {
         'environment' => getenv('DECKS_ENV') ?: 'development',
     ], JSON_THROW_ON_ERROR);
     exit;
+}
+
+function h(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function page(string $title, string $body): never
+{
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' . h($title) . '</title><style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:3rem auto;padding:0 1rem;color:#1e2933}form{display:grid;gap:.75rem;max-width:28rem}input,button{font:inherit;padding:.65rem}button{background:#1459a6;color:white;border:0;border-radius:.35rem}.error{color:#9e2b2b}</style></head><body>' . $body . '</body></html>';
+    exit;
+}
+
+function redirect_to(string $location): never
+{
+    header('Location: ' . $location, true, 303);
+    exit;
+}
+
+function remember_cookie_name(): string
+{
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? '__Host-decks_remember' : 'decks_remember';
+}
+
+function set_remember_cookie(string $value): void
+{
+    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    setcookie(remember_cookie_name(), $value, ['expires' => time() + 60 * 60 * 24 * 60, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+}
+
+if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', '/reset-password', '/logout', '/account/invite'], true)) {
+    start_secure_session();
+    $database = database();
+    if (!isset($_SESSION['user_id']) && isset($_COOKIE[remember_cookie_name()])) {
+        $restored = RememberMe::restore($database, (string) $_COOKIE[remember_cookie_name()]);
+        if ($restored !== null) {
+            $_SESSION['user_id'] = $restored['user_id'];
+            $_SESSION['security_version'] = $restored['security_version'];
+            set_remember_cookie($restored['token']);
+        }
+    }
+    $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+    $error = null;
+    if ($path === '/logout' && $method === 'POST') {
+        require_csrf($_POST['csrf_token'] ?? null);
+        if (isset($_COOKIE[remember_cookie_name()])) RememberMe::revoke($database, (string) $_COOKIE[remember_cookie_name()]);
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $parameters = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $parameters['path'], $parameters['domain'] ?? '', (bool) $parameters['secure'], (bool) $parameters['httponly']);
+        }
+        session_destroy();
+        redirect_to('/');
+    }
+    if ($path === '/login') {
+        if ($method === 'POST') {
+            try {
+                require_csrf($_POST['csrf_token'] ?? null);
+                $user = Security::authenticate($database, (string) ($_POST['email'] ?? ''), (string) ($_POST['password'] ?? ''));
+                if ($user === null) throw new RuntimeException('Email or password is incorrect.');
+                session_regenerate_id(true);
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['security_version'] = $user['security_version'];
+                if (isset($_POST['remember'])) {
+                    $remember = RememberMe::issue($database, $user['id']);
+                    set_remember_cookie($remember);
+                }
+                redirect_to('/');
+            } catch (Throwable $exception) { $error = $exception->getMessage(); }
+        }
+        $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
+        page('Sign in · Decks', '<h1>Sign in</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><label><input name="remember" type="checkbox" checked> Keep me signed in</label><button>Sign in</button></form><p><a href="/request-password-reset">Forgot your password?</a></p>');
+    }
+    if ($path === '/accept-invitation') {
+        $token = (string) ($_GET['token'] ?? $_POST['token'] ?? '');
+        if ($method === 'POST') {
+            try {
+                require_csrf($_POST['csrf_token'] ?? null);
+                $created = InvitationService::accept($database, $token, (string) ($_POST['password'] ?? ''));
+                session_regenerate_id(true);
+                $_SESSION['user_id'] = $created['id'];
+                $_SESSION['security_version'] = $created['security_version'];
+                redirect_to('/');
+            } catch (Throwable $exception) { $error = $exception->getMessage(); }
+        }
+        $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
+        page('Accept invitation · Decks', '<h1>Accept your Decks invitation</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="token" value="' . h($token) . '"><label>Choose a password<input name="password" type="password" autocomplete="new-password" minlength="16" required></label><button>Create account</button></form>');
+    }
+    if ($path === '/request-password-reset') {
+        if ($method === 'POST') {
+            try {
+                require_csrf($_POST['csrf_token'] ?? null);
+                PasswordResetService::request($database, (string) ($_POST['email'] ?? ''), getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240');
+            } catch (Throwable $exception) { /* Deliberately generic to prevent account enumeration. */ }
+            page('Check your email · Decks', '<h1>Check your email</h1><p>If an enabled account matches that address, a reset link will arrive shortly.</p>');
+        }
+        page('Reset password · Decks', '<h1>Reset your password</h1><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" autocomplete="email" required></label><button>Send reset link</button></form>');
+    }
+    if ($path === '/reset-password') {
+        $token = (string) ($_GET['token'] ?? $_POST['token'] ?? '');
+        if ($method === 'POST') {
+            try {
+                require_csrf($_POST['csrf_token'] ?? null);
+                PasswordResetService::consume($database, $token, (string) ($_POST['password'] ?? ''));
+                redirect_to('/login');
+            } catch (Throwable $exception) { $error = $exception->getMessage(); }
+        }
+        $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
+        page('Choose a new password · Decks', '<h1>Choose a new password</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="token" value="' . h($token) . '"><label>New password<input name="password" type="password" autocomplete="new-password" minlength="16" required></label><button>Save password</button></form>');
+    }
+    if ($path === '/account/invite') {
+        $user = Security::currentUser($database);
+        if ($user === null) redirect_to('/login?next=%2Faccount%2Finvite');
+        if ($method === 'POST') {
+            try {
+                require_csrf($_POST['csrf_token'] ?? null);
+                InvitationService::create($database, $user, (string) ($_POST['email'] ?? ''), getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240');
+                page('Invitation sent · Decks', '<h1>Invitation queued</h1><p>The invitation has been queued for delivery.</p><p><a href="/account/invite">Invite another person</a></p>');
+            } catch (Throwable $exception) { $error = $exception->getMessage(); }
+        }
+        $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
+        page('Invite someone · Decks', '<h1>Invite someone to Decks</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" autocomplete="email" required></label><button>Queue invitation</button></form>');
+    }
 }
 
 if (str_starts_with($path, '/api/')) {
