@@ -202,7 +202,7 @@ final class CardService
             $behavior = json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR); $matches[] = ['priority' => (int) $zone['priority'], 'area' => $width * $height, 'zone_id' => (string) $zone['id'], 'effect' => (string) ($behavior['effect'] ?? 'none'), 'geometry' => $geometry, 'behavior' => $behavior];
         }
         if ($matches === []) return;
-        usort($matches, static fn (array $left, array $right): int => $left['priority'] !== $right['priority'] ? $right['priority'] <=> $left['priority'] : ($left['area'] <=> $right['area'] ?: strcmp($left['zone_id'], $right['zone_id']));
+        usort($matches, static fn (array $left, array $right): int => $left['priority'] !== $right['priority'] ? $right['priority'] <=> $left['priority'] : ($left['area'] <=> $right['area'] ?: strcmp($left['zone_id'], $right['zone_id'])));
         $priority = $matches[0]['priority']; $area = $matches[0]['area']; $selected = array_values(array_filter($matches, static fn (array $match): bool => $match['priority'] === $priority && abs($match['area'] - $area) < 0.000001));
         $effects = array_values(array_unique(array_map(static fn (array $match): string => $match['effect'], $selected)));
         if (count($effects) > 1) throw new RuntimeException('Overlapping zones have conflicting effects.');
