@@ -9,7 +9,7 @@ set -euo pipefail
 
 php_fpm_bin="${DECKS_PHP_FPM_BIN:-}"
 if [[ -z "$php_fpm_bin" ]]; then
-  for candidate in php-fpm8.4 php-fpm8.3 php-fpm8.2 php-fpm; do
+  for candidate in php-fpm8.5 php-fpm8.4 php-fpm8.3 php-fpm8.2 php-fpm; do
     if command -v "$candidate" >/dev/null 2>&1; then php_fpm_bin="$candidate"; break; fi
   done
 fi

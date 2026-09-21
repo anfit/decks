@@ -4,7 +4,7 @@ commands:
     version: ">=20.19"
   php:
     version: ">=8.2"
-  php-fpm8.4: {}
+  php-fpm8.5: {}
   psql: {}
 paths:
   - /etc/nginx
