@@ -3,7 +3,7 @@ import "./styles.css";
 type User = { id: string; email: string; role: string };
 type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
-type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; cards: Card[] };
+type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -77,6 +77,7 @@ function renderTable(state: State): void {
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
   const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;
   const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${totalCardCount} cards`; workspace.append(meta);
+  if (state.zones.length) { const zones = document.createElement("p"); zones.className = "muted"; zones.textContent = `Zones: ${state.zones.map((zone) => zone.name).join(", ")}`; workspace.append(zones); }
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);

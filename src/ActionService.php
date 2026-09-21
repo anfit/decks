@@ -93,6 +93,10 @@ final class ActionService
             $id = $type === 'deck' ? (string) $container['deck_id'] : (string) $container['pile_id'];
             $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
         }
+        $zones = $database->prepare('SELECT id, name, geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
+        $zones->execute(['session' => $sessionId]);
+        $zoneProjection = [];
+        foreach ($zones as $zone) $zoneProjection[] = ['id' => (string) $zone['id'], 'name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR)];
         $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, x, y, rotation, z_index, face_state, version FROM session_cards WHERE session_id = :session');
         $cards->execute(['session' => $sessionId]);
         $cardProjection = [];
@@ -117,6 +121,7 @@ final class ActionService
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
             'participants' => array_map(static fn (array $row): array => ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => (string) $row['user_id'] === (string) $userId, 'hand_count' => $handCounts[(string) $row['id']] ?? 0], $participants->fetchAll()),
             'containers' => $containerProjection,
+            'zones' => $zoneProjection,
             'cards' => $cardProjection,
         ];
     }
@@ -159,6 +164,8 @@ final class ActionService
             'merge_pile_top', 'merge_pile_bottom' => PileService::mergeIntoDeck($database, $session, $member, $payload, $type === 'merge_pile_top' ? 'top' : 'bottom'),
             'collect_all' => self::collectAll($database, $session, $member),
             'reset_session' => self::resetSession($database, $session, $member, $payload),
+            'create_zone' => ZoneService::create($database, $session, $member, $payload),
+            'delete_zone' => ZoneService::delete($database, $session, $member, $payload),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }

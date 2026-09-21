@@ -11,6 +11,12 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("'containers' => $containerProjection", source)
         self.assertIn("$card['location_type'] === 'removed'", source)
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
+        self.assertIn("'zones' => $zoneProjection", source)
+
+    def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
+        source = read_text("src/ActionService.php")
+        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'"):
+            self.assertIn(action, source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
 
     def test_changes_endpoint_never_replays_raw_action_payloads(self) -> None:
