@@ -225,11 +225,22 @@ final class ActionService
         if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
         $result = self::collectAll($database, $session, $member);
         $database->prepare("UPDATE sessions SET status = 'lobby', frozen_at = NULL, ended_at = NULL WHERE id = :id")->execute(['id' => $session['id']]);
+        $initial = $database->prepare('SELECT initial_state FROM sessions WHERE id = :id');
+        $initial->execute(['id' => $session['id']]);
+        $initialState = json_decode((string) $initial->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        if (is_array($initialState) && is_array($initialState['configuration'] ?? null)) {
+            $configuration = $initialState['configuration'];
+            $presetId = isset($configuration['preset_id']) && is_string($configuration['preset_id']) ? $configuration['preset_id'] : null;
+            $database->prepare('UPDATE sessions SET access_settings = CAST(:settings AS jsonb), preset_id = :preset WHERE id = :id')->execute(['settings' => json_encode($configuration, JSON_THROW_ON_ERROR), 'preset' => $presetId, 'id' => $session['id']]);
+            $database->prepare('DELETE FROM session_zones WHERE session_id = :session')->execute(['session' => $session['id']]);
+            $insertZone = $database->prepare('INSERT INTO session_zones(session_id, name, geometry, priority, behavior, owner_user_id) VALUES (:session, :name, CAST(:geometry AS jsonb), :priority, CAST(:behavior AS jsonb), :owner)');
+            foreach (($initialState['zones'] ?? []) as $zone) $insertZone->execute(['session' => $session['id'], 'name' => $zone['name'], 'geometry' => json_encode($zone['geometry'], JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_encode($zone['behavior'], JSON_THROW_ON_ERROR), 'owner' => $member['user_id']]);
+        }
         if (($payload['shuffle'] ?? false) === true) {
             $decks = $database->prepare('SELECT id FROM session_decks WHERE session_id = :session'); $decks->execute(['session' => $session['id']]);
             foreach ($decks as $deck) CardService::shuffle($database, $session, $member, ['deck_id' => $deck['id']]);
         }
-        return ['reset' => true, 'shuffled' => ($payload['shuffle'] ?? false) === true, 'collected_cards' => $result['collected_cards']];
+        return ['reset' => true, 'shuffled' => ($payload['shuffle'] ?? false) === true, 'collected_cards' => $result['collected_cards'], 'initial_state_restored' => is_array($initialState) && isset($initialState['configuration'])];
     }
 
     private static function configureTable(PDO $database, array $session, array $member, array $user, array $payload): array
@@ -257,7 +268,20 @@ final class ActionService
         if (isset($payload['preset_id']) && $payload['preset_id'] !== null && !preg_match('/^[0-9a-fA-F-]{36}$/', (string) $payload['preset_id'])) throw new RuntimeException('Preset reference is invalid.');
         if ($preset === null) $configuration['preset_id'] = null;
         $database->prepare('UPDATE sessions SET access_settings = CAST(:settings AS jsonb) WHERE id = :id')->execute(['settings' => json_encode($configuration, JSON_THROW_ON_ERROR), 'id' => $session['id']]);
+        self::captureInitialState($database, (string) $session['id'], $configuration);
         return ['configuration' => $configuration];
+    }
+
+    public static function captureInitialState(PDO $database, string $sessionId, array $configuration): void
+    {
+        $session = $database->prepare("SELECT status FROM sessions WHERE id = :id FOR UPDATE");
+        $session->execute(['id' => $sessionId]);
+        if ((string) $session->fetchColumn() !== 'lobby') return;
+        $zones = $database->prepare('SELECT name, geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
+        $zones->execute(['session' => $sessionId]);
+        $projection = [];
+        foreach ($zones as $zone) $projection[] = ['name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR)];
+        $database->prepare('UPDATE sessions SET initial_state = CAST(:state AS jsonb) WHERE id = :id')->execute(['state' => json_encode(['configuration' => $configuration, 'zones' => $projection], JSON_THROW_ON_ERROR), 'id' => $sessionId]);
     }
 
     /** Keep durable activity metadata useful without retaining hidden card identities or peek results. */

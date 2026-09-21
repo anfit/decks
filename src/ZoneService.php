@@ -29,7 +29,10 @@ final class ZoneService
         }
         $insert = $database->prepare('INSERT INTO session_zones(session_id, name, geometry, priority, behavior, owner_user_id) VALUES (:session, :name, CAST(:geometry AS jsonb), :priority, CAST(:behavior AS jsonb), :owner) RETURNING id');
         $insert->execute(['session' => $session['id'], 'name' => $name, 'geometry' => json_encode($geometry, JSON_THROW_ON_ERROR), 'priority' => (int) ($payload['priority'] ?? 0), 'behavior' => json_encode($behavior, JSON_THROW_ON_ERROR), 'owner' => $member['user_id']]);
-        return ['zone_id' => (string) $insert->fetchColumn(), 'name' => $name];
+        $zoneId = (string) $insert->fetchColumn();
+        $settings = $database->prepare('SELECT access_settings FROM sessions WHERE id = :id'); $settings->execute(['id' => $session['id']]);
+        ActionService::captureInitialState($database, (string) $session['id'], json_decode((string) $settings->fetchColumn(), true, 512, JSON_THROW_ON_ERROR));
+        return ['zone_id' => $zoneId, 'name' => $name];
     }
 
     public static function delete(PDO $database, array $session, array $member, array $payload): array
@@ -39,6 +42,8 @@ final class ZoneService
         $delete = $database->prepare('DELETE FROM session_zones WHERE session_id = :session AND id = :id');
         $delete->execute(['session' => $session['id'], 'id' => $id]);
         if ($delete->rowCount() !== 1) throw new RuntimeException('Zone not found.');
+        $settings = $database->prepare('SELECT access_settings FROM sessions WHERE id = :id'); $settings->execute(['id' => $session['id']]);
+        ActionService::captureInitialState($database, (string) $session['id'], json_decode((string) $settings->fetchColumn(), true, 512, JSON_THROW_ON_ERROR));
         return ['zone_id' => $id, 'deleted' => true];
     }
 
