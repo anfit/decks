@@ -152,7 +152,7 @@ final class InvitationService
             $link = rtrim($baseUrl, '/') . '/accept-invitation?token=' . rawurlencode($token['value']);
             MailOutbox::enqueue($database, 'account_invitation', (string) $invite['email'], 'You are invited to Decks',
                 "You have been invited to Decks. Accept this invitation: {$link}\n\nThis link expires in {$days} days.", $invitationId);
-            Security::audit($database, (string) $actor['id'], 'account.invitation_resent', 'user_invitation', $invitationId, ['email' => (string) $invite['email']);
+            Security::audit($database, (string) $actor['id'], 'account.invitation_resent', 'user_invitation', $invitationId, ['email' => (string) $invite['email']]);
             $database->commit();
             return ['status' => 'resent'];
         } catch (\Throwable $error) {
