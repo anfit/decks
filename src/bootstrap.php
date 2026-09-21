@@ -55,6 +55,8 @@ function database(): PDO
 function start_secure_session(): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) return;
+    $sessionPath = getenv('DECKS_SESSION_PATH');
+    if (is_string($sessionPath) && $sessionPath !== '') session_save_path($sessionPath);
     session_name('decks');
     session_set_cookie_params([
         'httponly' => true,
