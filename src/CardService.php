@@ -193,7 +193,7 @@ final class CardService
 
     private static function applyZoneEffect(PDO $database, string $sessionId, string $cardId, float $x, float $y, ?string $ownerUserId = null): void
     {
-        $zones = $database->prepare('SELECT geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
+        $zones = $database->prepare('SELECT id, geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
         $zones->execute(['session' => $sessionId]); $matches = [];
         foreach ($zones as $zone) {
             $geometry = json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR);

@@ -13,6 +13,8 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
         self.assertIn("'zones' => $zoneProjection", source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
+        self.assertIn("face_state, owner_user_id, version", source)
+        self.assertIn("SELECT id, geometry, priority, behavior FROM session_zones", read_text("src/CardService.php"))
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")

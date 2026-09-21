@@ -97,7 +97,7 @@ final class ActionService
         $zones->execute(['session' => $sessionId]);
         $zoneProjection = [];
         foreach ($zones as $zone) $zoneProjection[] = ['id' => (string) $zone['id'], 'name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR)];
-        $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, x, y, rotation, z_index, face_state, version FROM session_cards WHERE session_id = :session');
+        $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, x, y, rotation, z_index, face_state, owner_user_id, version FROM session_cards WHERE session_id = :session');
         $cards->execute(['session' => $sessionId]);
         $cardProjection = [];
         foreach ($cards as $card) {
