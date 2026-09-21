@@ -56,6 +56,6 @@ Different sessions may proceed concurrently. Stale dependency versions produce a
 
 ## Local and production runtime
 
-The current production host provides Node `24.21.0`, npm `11.19.0` and PostgreSQL 18. The realtime bridge is supported on the Node 24.x line; the application contract and lockfile must therefore reject older or newer major Node versions rather than silently selecting an unsupported runtime. Production prerequisites must assert PHP `>=8.2`, PostgreSQL 18 and Node `>=24.21 <25` on `prod`; they must not be guessed from this workstation. The Windows shell may use a different Node/PostgreSQL client version, and PHP/FPM integration still requires WSL/Linux or an equivalent pinned environment.
+Production supports the Node `22.22+` through `24.x` lines; the application contract and lockfile must reject older or newer major Node versions rather than silently selecting an unsupported runtime. PostgreSQL 18 is required. Production prerequisites must assert PHP `>=8.2`, PostgreSQL 18 and Node `>=22.22 <25` on `prod`; they must not be guessed from this workstation. The Windows shell may use a different Node/PostgreSQL client version, and PHP/FPM integration still requires WSL/Linux or an equivalent pinned environment.
 
 The initial renderer is DOM-based with absolutely positioned cards and CSS transforms. Canvas/WebGL, Redis, an external queue, containers, a CDN and multiple application nodes are deferred until measured need.
