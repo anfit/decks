@@ -148,8 +148,8 @@ final class ActionService
     private static function setStatus(PDO $database, array $session, array $member, string $status): array
     {
         if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
-        $database->prepare('UPDATE sessions SET status = :status, frozen_at = CASE WHEN :set_frozen THEN now() ELSE frozen_at END, ended_at = CASE WHEN :set_ended THEN now() ELSE ended_at END WHERE id = :id')
-            ->execute(['status' => $status, 'set_frozen' => $status === 'active', 'set_ended' => $status === 'ended', 'id' => $session['id']]);
+        $database->prepare('UPDATE sessions SET status = :status, frozen_at = CASE WHEN :set_frozen = \'true\' THEN now() ELSE frozen_at END, ended_at = CASE WHEN :set_ended = \'true\' THEN now() ELSE ended_at END WHERE id = :id')
+            ->execute(['status' => $status, 'set_frozen' => $status === 'active' ? 'true' : 'false', 'set_ended' => $status === 'ended' ? 'true' : 'false', 'id' => $session['id']]);
         return ['session_id' => (string) $session['id'], 'status' => $status];
     }
 

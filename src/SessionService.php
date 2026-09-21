@@ -126,8 +126,8 @@ final class SessionService
             $session = $database->prepare('SELECT status FROM sessions WHERE id = :id FOR UPDATE');
             $session->execute(['id' => $sessionId]);
             if (!$session->fetch()) throw new RuntimeException('Session not found.');
-            $database->prepare('UPDATE sessions SET status = :status, frozen_at = CASE WHEN :set_frozen THEN now() ELSE frozen_at END, ended_at = CASE WHEN :set_ended THEN now() ELSE ended_at END, revision = revision + 1, last_activity_at = now() WHERE id = :id')
-                ->execute(['status' => $status, 'set_frozen' => $status === 'active', 'set_ended' => $status === 'ended', 'id' => $sessionId]);
+            $database->prepare('UPDATE sessions SET status = :status, frozen_at = CASE WHEN :set_frozen = \'true\' THEN now() ELSE frozen_at END, ended_at = CASE WHEN :set_ended = \'true\' THEN now() ELSE ended_at END, revision = revision + 1, last_activity_at = now() WHERE id = :id')
+                ->execute(['status' => $status, 'set_frozen' => $status === 'active' ? 'true' : 'false', 'set_ended' => $status === 'ended' ? 'true' : 'false', 'id' => $sessionId]);
             Security::audit($database, (string) $user['id'], 'session.' . $status, 'session', $sessionId);
             $database->commit();
         } catch (\Throwable $error) {
