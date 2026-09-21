@@ -49,7 +49,7 @@ final class ActionService
                 'INSERT INTO session_events(session_id, revision, actor_user_id, action_type, public_payload)
                  VALUES (:session, :revision, :actor, :type, CAST(:payload AS jsonb))',
             );
-            $event->execute(['session' => $sessionId, 'revision' => $revision, 'actor' => $user['id'], 'type' => $type, 'payload' => json_encode($result, JSON_THROW_ON_ERROR)]);
+            $event->execute(['session' => $sessionId, 'revision' => $revision, 'actor' => $user['id'], 'type' => $type, 'payload' => json_encode(self::sanitizeEvent($type, $result), JSON_THROW_ON_ERROR)]);
             $stored = $database->prepare(
                 'INSERT INTO processed_actions(session_id, actor_user_id, action_id, request_hash, revision, status, result)
                  VALUES (:session, :actor, :action, :hash, :revision, \'accepted\', CAST(:result AS jsonb))',
@@ -246,6 +246,25 @@ final class ActionService
         $configuration['preset_id'] = isset($payload['preset_id']) ? ($payload['preset_id'] === null ? null : (string) $payload['preset_id']) : null;
         $database->prepare('UPDATE sessions SET access_settings = CAST(:settings AS jsonb) WHERE id = :id')->execute(['settings' => json_encode($configuration, JSON_THROW_ON_ERROR), 'id' => $session['id']]);
         return ['configuration' => $configuration];
+    }
+
+    /** Keep durable activity metadata useful without retaining hidden card identities or peek results. */
+    private static function sanitizeEvent(string $type, array $result): array
+    {
+        $sanitize = static function (mixed $value) use (&$sanitize): mixed {
+            if (is_array($value)) {
+                $clean = [];
+                foreach ($value as $key => $item) {
+                    if (in_array((string) $key, ['card_id', 'card_ids', 'card_definition_id', 'cards', 'secret', 'token'], true)) continue;
+                    $clean[$key] = $sanitize($item);
+                }
+                return $clean;
+            }
+            return $value;
+        };
+        $clean = $sanitize($result);
+        if ($type === 'peek_card') return ['action' => 'peek_card', 'revealed' => true];
+        return is_array($clean) ? $clean : ['action' => $type];
     }
 
     private static function canonicalJson(mixed $value): string

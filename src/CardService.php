@@ -42,6 +42,7 @@ final class CardService
                 'y' => $target === 'table' ? (float) ($payload['y'] ?? 0) + $index * 24 : null,
                 'face_state' => $face, 'id' => $card['id'],
             ]);
+            if ($location === 'table') self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0) + $index * 24, (float) ($payload['y'] ?? 0) + $index * 24);
             $drawn[] = ['id' => (string) $card['id'], 'location_type' => $location, 'face_state' => $face];
         }
         self::bumpDeck($database, $deckId);
@@ -167,7 +168,8 @@ final class CardService
         foreach ($items as $item) {
             if (!is_array($item)) throw new RuntimeException('Card selection is invalid.');
             $card=self::card($database,$session['id'],(string)($item['card_id']??'')); self::assertVersion($card,$item); self::assertCanControl($card,$member); if($card['location_type']!=='table') throw new RuntimeException('Only table cards can move as a group.');
-            $update->execute(['x'=>(float)($item['x']??$card['x']),'y'=>(float)($item['y']??$card['y']),'rotation'=>(float)($item['rotation']??$card['rotation']),'z'=>(int)($item['z_index']??$card['z_index']),'id'=>$card['id']]); $moved[]=(string)$card['id'];
+            $nextX = (float) ($item['x'] ?? $card['x']); $nextY = (float) ($item['y'] ?? $card['y']);
+            $update->execute(['x'=>$nextX,'y'=>$nextY,'rotation'=>(float)($item['rotation']??$card['rotation']),'z'=>(int)($item['z_index']??$card['z_index']),'id'=>$card['id']]); self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY); $moved[]=(string)$card['id'];
         }
         return ['card_ids'=>$moved,'count'=>count($moved)];
     }
@@ -189,6 +191,27 @@ final class CardService
         self::assertPlayer($session,$member);$card=self::card($database,$session['id'],(string)($payload['card_id']??''));if(!in_array($card['location_type'],['table','pile'],true)||$card['face_state']==='up')throw new RuntimeException('Only a face-down table or pile card can be peeked.');self::assertCanControl($card,$member);Security::audit($database,(string)$member['user_id'],'card.peek','session_card',(string)$card['id']);return ['card_id'=>(string)$card['id'],'card_definition_id'=>(string)$card['card_definition_id'],'expires_in_seconds'=>30];
     }
 
+    private static function applyZoneEffect(PDO $database, string $sessionId, string $cardId, float $x, float $y): void
+    {
+        $zones = $database->prepare('SELECT geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
+        $zones->execute(['session' => $sessionId]); $matches = [];
+        foreach ($zones as $zone) {
+            $geometry = json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR);
+            $left = (float) ($geometry['x'] ?? 0); $top = (float) ($geometry['y'] ?? 0); $width = (float) ($geometry['width'] ?? 0); $height = (float) ($geometry['height'] ?? 0);
+            if ($x < $left || $y < $top || $x > $left + $width || $y > $top + $height) continue;
+            $behavior = json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR); $matches[] = ['priority' => (int) $zone['priority'], 'effect' => (string) ($behavior['effect'] ?? 'none'), 'geometry' => $geometry];
+        }
+        if ($matches === []) return;
+        $priority = $matches[0]['priority']; $selected = array_values(array_filter($matches, static fn (array $match): bool => $match['priority'] === $priority));
+        $effects = array_values(array_unique(array_map(static fn (array $match): string => $match['effect'], $selected)));
+        if (count($effects) > 1) throw new RuntimeException('Overlapping zones have conflicting effects.');
+        $effect = $effects[0];
+        if ($effect === 'face_up') $database->prepare("UPDATE session_cards SET face_state='up', version=version+1 WHERE id=:id")->execute(['id'=>$cardId]);
+        if ($effect === 'face_down') $database->prepare("UPDATE session_cards SET face_state='down', version=version+1 WHERE id=:id")->execute(['id'=>$cardId]);
+        if ($effect === 'stack') $database->prepare('UPDATE session_cards SET z_index = z_index + 1, version = version + 1 WHERE id = :id')->execute(['id' => $cardId]);
+        if ($effect === 'align') { $geometry = $selected[0]['geometry']; $centerX = (float) $geometry['x'] + (float) $geometry['width'] / 2; $centerY = (float) $geometry['y'] + (float) $geometry['height'] / 2; $database->prepare('UPDATE session_cards SET x=:x, y=:y, version=version+1 WHERE id=:id')->execute(['x'=>$centerX,'y'=>$centerY,'id'=>$cardId]); }
+    }
+
     public static function moveCard(PDO $database, array $session, array $member, array $payload): array
     {
         self::assertPlayer($session, $member);
@@ -197,8 +220,10 @@ final class CardService
         self::assertCanControl($card, $member);
         if (!in_array($card['location_type'], ['table', 'hand'], true)) throw new RuntimeException('Only table or own-hand cards can change face state.');
         if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards have spatial positions.');
+        $nextX = (float) ($payload['x'] ?? $card['x']); $nextY = (float) ($payload['y'] ?? $card['y']);
         $database->prepare('UPDATE session_cards SET x = :x, y = :y, rotation = :rotation, z_index = :z, version = version + 1 WHERE id = :id')
-            ->execute(['x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y']), 'rotation' => (float) ($payload['rotation'] ?? $card['rotation']), 'z' => (int) ($payload['z_index'] ?? $card['z_index']), 'id' => $card['id']]);
+            ->execute(['x' => $nextX, 'y' => $nextY, 'rotation' => (float) ($payload['rotation'] ?? $card['rotation']), 'z' => (int) ($payload['z_index'] ?? $card['z_index']), 'id' => $card['id']]);
+        self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY);
         return ['card_id' => (string) $card['id'], 'x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y'])];
     }
 
@@ -241,6 +266,7 @@ final class CardService
         $face = ($payload['face_state'] ?? 'down') === 'up' ? 'up' : 'down';
         $database->prepare("UPDATE session_cards SET location_type = 'table', deck_id = NULL, pile_id = NULL, hand_participant_id = NULL, order_key = NULL, x = :x, y = :y, face_state = :face, version = version + 1 WHERE id = :id")
             ->execute(['x' => (float) ($payload['x'] ?? 0), 'y' => (float) ($payload['y'] ?? 0), 'face' => $face, 'id' => $card['id']]);
+        self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0), (float) ($payload['y'] ?? 0));
         self::normalizeHand($database, $session['id'], (string) $member['id']);
         self::bumpHand($database, $session['id'], (string) $member['id']);
         return ['card_id' => (string) $card['id'], 'face_state' => $face];

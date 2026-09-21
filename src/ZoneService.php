@@ -18,6 +18,9 @@ final class ZoneService
         if (!is_array($geometry) || !is_finite((float) ($geometry['x'] ?? NAN)) || !is_finite((float) ($geometry['y'] ?? NAN)) || !is_finite((float) ($geometry['width'] ?? NAN)) || !is_finite((float) ($geometry['height'] ?? NAN)) || (float) $geometry['width'] <= 0 || (float) $geometry['height'] <= 0) throw new RuntimeException('Zone geometry is invalid.');
         $behavior = $payload['behavior'] ?? [];
         if (!is_array($behavior)) throw new RuntimeException('Zone behavior is invalid.');
+        $effect = (string) ($behavior['effect'] ?? 'none');
+        if (!in_array($effect, ['none', 'face_up', 'face_down', 'stack', 'align'], true)) throw new RuntimeException('Zone effect is invalid.');
+        $behavior = ['effect' => $effect];
         $insert = $database->prepare('INSERT INTO session_zones(session_id, name, geometry, priority, behavior, owner_user_id) VALUES (:session, :name, CAST(:geometry AS jsonb), :priority, CAST(:behavior AS jsonb), :owner) RETURNING id');
         $insert->execute(['session' => $session['id'], 'name' => $name, 'geometry' => json_encode($geometry, JSON_THROW_ON_ERROR), 'priority' => (int) ($payload['priority'] ?? 0), 'behavior' => json_encode($behavior, JSON_THROW_ON_ERROR), 'owner' => $member['user_id']]);
         return ['zone_id' => (string) $insert->fetchColumn(), 'name' => $name];

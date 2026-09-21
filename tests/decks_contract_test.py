@@ -31,6 +31,13 @@ class DecksContractTest(unittest.TestCase):
         source = read_text("src/ActionService.php")
         self.assertIn("'action_type' => (string) $row['action_type']", source)
         self.assertNotIn("'payload' => json_decode((string) $row['public_payload']", source)
+        self.assertIn("sanitizeEvent($type, $result)", source)
+        self.assertIn("'card_definition_id', 'cards'", source)
+        card_source = read_text("src/CardService.php")
+        self.assertIn("applyZoneEffect", card_source)
+        self.assertIn("Overlapping zones have conflicting effects", card_source)
+        zone_source = read_text("src/ZoneService.php")
+        self.assertIn("['none', 'face_up', 'face_down', 'stack', 'align']", zone_source)
 
     def test_frontend_draws_from_authorized_container_projection(self) -> None:
         source = read_text("frontend/src/main.ts")
