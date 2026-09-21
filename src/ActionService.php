@@ -75,7 +75,7 @@ final class ActionService
         if (!is_array($session)) throw new RuntimeException('Session not found.');
         $participants = $database->prepare('SELECT id, user_id, role, seat FROM session_participants WHERE session_id = :session AND removed_at IS NULL ORDER BY created_at, id');
         $participants->execute(['session' => $sessionId]);
-        $hands = $database->prepare('SELECT participant_id, count(*) AS card_count FROM session_cards WHERE session_id = :session AND location_type = \'hand\' GROUP BY participant_id');
+        $hands = $database->prepare('SELECT hand_participant_id AS participant_id, count(*) AS card_count FROM session_cards WHERE session_id = :session AND location_type = \'hand\' GROUP BY hand_participant_id');
         $hands->execute(['session' => $sessionId]);
         $handCounts = [];
         foreach ($hands as $hand) $handCounts[(string) $hand['participant_id']] = (int) $hand['card_count'];
