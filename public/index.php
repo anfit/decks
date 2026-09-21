@@ -9,6 +9,7 @@ use Decks\ActionService;
 use Decks\AssetService;
 use Decks\PasswordResetService;
 use Decks\RememberMe;
+use Decks\RealtimeTicket;
 use Decks\Security;
 use Decks\SessionService;
 use Decks\TemplateService;
@@ -199,6 +200,10 @@ if (str_starts_with($path, '/api/')) {
         return is_array($decoded) ? $decoded : [];
     }
 
+    if ($path === '/api/csrf' && $method === 'GET') {
+        json_response(['csrf_token' => csrf_token()]);
+    }
+
     if ($path === '/api/me' && $method === 'GET') {
         if ($user === null) json_response(['error' => 'authentication_required'], 401);
         json_response(['user' => $user]);
@@ -225,7 +230,7 @@ if (str_starts_with($path, '/api/')) {
         }
         if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/join$#', $path, $matches) && $method === 'POST') {
             $body = json_body();
-            $joined = SessionService::join($database, $user, (string) ($body['token'] ?? ''), (string) ($body['role'] ?? 'player'));
+            $joined = SessionService::join($database, $user, (string) ($body['token'] ?? ''), (string) ($body['role'] ?? 'player'), $matches[1]);
             json_response(['membership' => $joined], 201);
         }
         if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/state$#', $path, $matches) && $method === 'GET') {
@@ -235,6 +240,12 @@ if (str_starts_with($path, '/api/')) {
             $after = filter_var($_GET['after'] ?? 0, FILTER_VALIDATE_INT);
             if ($after === false || $after < 0) json_response(['error' => 'invalid_revision'], 400);
             json_response(['changes' => ActionService::changes($database, $matches[1], (string) $user['id'], $after)]);
+        }
+        if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/realtime-ticket$#', $path, $matches) && $method === 'POST') {
+            if (SessionService::membership($database, $matches[1], (string) $user['id']) === null) {
+                json_response(['error' => 'table_membership_required'], 403);
+            }
+            json_response(['ticket' => RealtimeTicket::issue($matches[1], $user)]);
         }
         if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/actions$#', $path, $matches) && $method === 'POST') {
             $result = ActionService::execute($database, $user, $matches[1], json_body());

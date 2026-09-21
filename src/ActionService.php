@@ -129,6 +129,10 @@ final class ActionService
             'move_to_hand' => CardService::moveToHand($database, $session, $member, $payload),
             'play_from_hand' => CardService::playFromHand($database, $session, $member, $payload),
             'return_top', 'return_bottom' => CardService::returnToDeck($database, $session, $member, $payload, $type === 'return_top' ? 'top' : 'bottom'),
+            'create_pile' => PileService::create($database, $session, $member, $payload),
+            'move_to_pile' => PileService::move($database, $session, $member, $payload),
+            'shuffle_pile' => PileService::shuffle($database, $session, $member, $payload),
+            'merge_pile_top', 'merge_pile_bottom' => PileService::mergeIntoDeck($database, $session, $member, $payload, $type === 'merge_pile_top' ? 'top' : 'bottom'),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }

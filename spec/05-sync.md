@@ -12,9 +12,9 @@ Projection code is allowlist-based and viewer-specific. Public table cards inclu
 
 ## Realtime
 
-The Node service will authenticate a short-lived table-scoped ticket and listen for PostgreSQL `decks_session_changed` payloads containing only `session_id` and `revision`. A notification is a hint; the browser catches up through HTTP and periodically reconciles revisions. Dropped/out-of-order/duplicate notifications are safe. Node failure cannot lose durable state.
+The Node service authenticates a short-lived (maximum ten minutes) table-scoped HMAC ticket. On each WebSocket upgrade it rechecks the ticket audience against `session_participants` and the account's enabled/security version in PostgreSQL. It listens for PostgreSQL `decks_session_changed` payloads containing only `session_id` and `revision` and broadcasts only to sockets for that table. A notification is a hint; the browser catches up through HTTP and periodically reconciles revisions. Dropped/out-of-order/duplicate notifications are safe. Node failure cannot lose durable state. Ticket expiry, account disablement/security-version changes and membership removal prevent new connections; the browser must reconnect through PHP to obtain a fresh ticket.
 
-Transient cursor/drag messages are bounded, rate-limited and contain only public interaction handles. They are not persisted and are discarded on reconnect. PHP card/object versions and durable locks remain the correctness boundary.
+Transient cursor/drag messages are bounded, rate-limited and contain only public interaction handles. The current bridge accepts only a bounded ping message and does not persist client interaction data; future cursor messages must retain these limits. PHP card/object versions and durable locks remain the correctness boundary.
 
 ## Conflict and recovery behavior
 
