@@ -3,7 +3,7 @@ import "./styles.css";
 type User = { id: string; email: string; role: string };
 type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
-type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -73,6 +73,7 @@ function showJoinResult(session: { id: string; join_token: string }): void {
 function renderTable(state: State): void {
   if (!workspace) return;
   currentState = state; workspace.replaceChildren();
+  if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
   const heading = document.createElement("h2"); heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
   const tableCardCount = state.cards.filter((card) => card.location_type === "table").length;
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);

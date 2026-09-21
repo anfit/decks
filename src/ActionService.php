@@ -69,7 +69,7 @@ final class ActionService
     {
         $member = SessionService::membership($database, $sessionId, $userId);
         if ($member === null) throw new RuntimeException('Active table membership required.');
-        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at FROM sessions WHERE id = :id');
+        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at, access_settings FROM sessions WHERE id = :id');
         $sessionStatement->execute(['id' => $sessionId]);
         $session = $sessionStatement->fetch();
         if (!is_array($session)) throw new RuntimeException('Session not found.');
@@ -119,6 +119,7 @@ final class ActionService
         return [
             'revision' => (int) $session['revision'],
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
+            'configuration' => json_decode((string) $session['access_settings'], true, 512, JSON_THROW_ON_ERROR),
             'participants' => array_map(static fn (array $row): array => ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => (string) $row['user_id'] === (string) $userId, 'hand_count' => $handCounts[(string) $row['id']] ?? 0], $participants->fetchAll()),
             'containers' => $containerProjection,
             'zones' => $zoneProjection,
@@ -173,6 +174,7 @@ final class ActionService
             'reset_session' => self::resetSession($database, $session, $member, $payload),
             'create_zone' => ZoneService::create($database, $session, $member, $payload),
             'delete_zone' => ZoneService::delete($database, $session, $member, $payload),
+            'configure_table' => self::configureTable($database, $session, $member, $payload),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }
@@ -227,6 +229,23 @@ final class ActionService
             foreach ($decks as $deck) CardService::shuffle($database, $session, $member, ['deck_id' => $deck['id']]);
         }
         return ['reset' => true, 'shuffled' => ($payload['shuffle'] ?? false) === true, 'collected_cards' => $result['collected_cards']];
+    }
+
+    private static function configureTable(PDO $database, array $session, array $member, array $payload): array
+    {
+        if ($member['role'] !== 'host' || $session['status'] !== 'lobby') throw new RuntimeException('Only the host can configure a lobby.');
+        $configuration = ['mat' => [], 'preset_id' => null];
+        if (isset($payload['mat'])) {
+            if (!is_array($payload['mat'])) throw new RuntimeException('Mat configuration is invalid.');
+            $label = trim((string) ($payload['mat']['label'] ?? '')); $color = strtolower(trim((string) ($payload['mat']['color'] ?? '')));
+            if ($label !== '' && strlen($label) > 120) throw new RuntimeException('Mat label is invalid.');
+            if ($color !== '' && !preg_match('/^#[0-9a-f]{6}$/', $color)) throw new RuntimeException('Mat color is invalid.');
+            $configuration['mat'] = array_filter(['label' => $label ?: null, 'color' => $color ?: null], static fn (mixed $value): bool => $value !== null);
+        }
+        if (isset($payload['preset_id']) && $payload['preset_id'] !== null && !preg_match('/^[0-9a-fA-F-]{36}$/', (string) $payload['preset_id'])) throw new RuntimeException('Preset reference is invalid.');
+        $configuration['preset_id'] = isset($payload['preset_id']) ? ($payload['preset_id'] === null ? null : (string) $payload['preset_id']) : null;
+        $database->prepare('UPDATE sessions SET access_settings = CAST(:settings AS jsonb) WHERE id = :id')->execute(['settings' => json_encode($configuration, JSON_THROW_ON_ERROR), 'id' => $session['id']]);
+        return ['configuration' => $configuration];
     }
 
     private static function canonicalJson(mixed $value): string
