@@ -34,6 +34,16 @@ A global administrator does not automatically gain visibility into a private han
 - Resend rotates token and expiry. Rescind invalidates the link, cancels unsent delivery where possible and idempotently restores an eligible consumed credit. Expiry or delivery failure does not automatically restore credit.
 - Inviter/admin views show delivery state without revealing token values. Old links fail closed.
 
+## Account and administration web surface
+
+The web account surface follows the reviewed Scholion reference architecture while keeping Decks' own schema and credentials. An authenticated user may open `/account` to see their email, role and invitation credit, review invitations they issued, rescind a pending invitation, change their password with the current password and confirmation, and sign out everywhere. Password changes and sign-out-everywhere revoke remember tokens and increment the account security version; the current browser session is then cleared and must sign in again.
+
+An administrator may open `/admin/users` to invite an account, inspect users and invitation delivery states, resend or rescind a pending invitation, restore one eligible member invitation credit exactly once, request an administrator password-reset email, enable or disable a user, and change a user's `member`/`admin` role. The final enabled administrator cannot be disabled or demoted. Disabled accounts remain in the database for audit attribution, lose protected requests and realtime authorization, and have remembered authentication revoked. No account deletion route is provided.
+
+Invitation resend rotates the selector and secret and invalidates the previous link. Rescind cancels unsent invitation mail where possible and restores a consumed member credit atomically; repeated rescind or restore operations are idempotent. Delivery state is derived from the Decks-owned outbox and never exposes token-bearing URLs. Administrative mutations are CSRF-protected, use generic reset responses, and record sanitized account audit events.
+
+Login and password-reset requests use a PostgreSQL-backed per-IP and per-email rate limiter. Rate-limit subjects are HMAC-hashed with a Decks-only key, old windows are pruned opportunistically, and reset responses remain generic whether or not an account exists.
+
 ## Password recovery and mail
 
 - Password reset links are single-use, one hour by default, replace earlier unused links and revoke remember/OAuth-equivalent authentication artifacts on completion. Forgot-password requests have generic responses and rate limits to prevent account enumeration.
