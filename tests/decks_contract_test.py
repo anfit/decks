@@ -12,6 +12,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("$card['location_type'] === 'removed'", source)
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
         self.assertIn("'zones' => $zoneProjection", source)
+        self.assertIn("'hand_participant_id' => $isOwnHand", source)
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")
@@ -24,7 +25,6 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("request.headers.origin", source)
         self.assertIn("authorizationCheck", source)
         self.assertIn("maintainListener", source)
-        self.assertIn("'hand_participant_id' => $isOwnHand", source)
 
     def test_changes_endpoint_never_replays_raw_action_payloads(self) -> None:
         source = read_text("src/ActionService.php")
