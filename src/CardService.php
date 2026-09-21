@@ -230,6 +230,19 @@ final class CardService
         return ['card_id' => (string) $card['id'], 'x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y'])];
     }
 
+    public static function rotateCard(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        self::assertVersion($card, $payload);
+        self::assertCanControl($card, $member);
+        if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards can rotate.');
+        $rotation = (float) ($payload['rotation'] ?? $card['rotation']);
+        if (!is_finite($rotation) || $rotation < -3600 || $rotation > 3600) throw new RuntimeException('Card rotation is invalid.');
+        $database->prepare('UPDATE session_cards SET rotation = :rotation, version = version + 1 WHERE id = :id')->execute(['rotation' => $rotation, 'id' => $card['id']]);
+        return ['card_id' => (string) $card['id'], 'rotation' => $rotation];
+    }
+
     public static function face(PDO $database, array $session, array $member, string $operation, array $payload): array
     {
         self::assertPlayer($session, $member);

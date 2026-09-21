@@ -75,6 +75,28 @@ final class PileService
         return ['pile_id' => (string) $pile['id'], 'card_count' => count($rows), 'reversed' => true, 'faces_flipped' => $flipFaces];
     }
 
+    public static function spread(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
+        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
+        $spacing = (float) ($payload['spacing'] ?? 28);
+        if (!is_finite($spacing) || $spacing < 1 || $spacing > 500) throw new RuntimeException('Spread spacing is invalid.');
+        $axis = ($payload['axis'] ?? 'x') === 'y' ? 'y' : 'x';
+        $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
+        $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]);
+        $rows = $cards->fetchAll();
+        foreach ($rows as $index => $card) {
+            self::assertCanControl($card, $member);
+            $x = (float) $pile['x'] + ($axis === 'x' ? $index * $spacing : 0);
+            $y = (float) $pile['y'] + ($axis === 'y' ? $index * $spacing : 0);
+            $database->prepare("UPDATE session_cards SET location_type='table', deck_id=NULL, pile_id=NULL, hand_participant_id=NULL, order_key=NULL, x=:x, y=:y, z_index=:z, owner_user_id=NULL, version=version+1 WHERE id=:id")
+                ->execute(['x' => $x, 'y' => $y, 'z' => (int) $pile['z_index'] + $index, 'id' => $card['id']]);
+        }
+        $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pile['id']]);
+        return ['pile_id' => (string) $pile['id'], 'card_count' => count($rows), 'axis' => $axis, 'spacing' => $spacing];
+    }
+
     public static function mergeIntoDeck(PDO $database, array $session, array $member, array $payload, string $position): array
     {
         self::assertPlayer($session, $member);
