@@ -165,6 +165,7 @@ final class ActionService
             'peek_card' => CardService::peek($database, $session, $member, $payload),
             'move_card' => CardService::moveCard($database, $session, $member, $payload),
             'rotate_card' => CardService::rotateCard($database, $session, $member, $payload),
+            'undo_action' => self::undoAction($database, $session, $member, $user, $payload),
             'flip_card', 'turn_face_up', 'turn_face_down' => CardService::face($database, $session, $member, $type, $payload),
             'move_to_hand' => CardService::moveToHand($database, $session, $member, $payload),
             'play_from_hand' => CardService::playFromHand($database, $session, $member, $payload),
@@ -277,6 +278,31 @@ final class ActionService
         return ['configuration' => $configuration];
     }
 
+    private static function undoAction(PDO $database, array $session, array $member, array $user, array $payload): array
+    {
+        if (!in_array($member['role'], ['host', 'player'], true)) throw new RuntimeException('Player permission required.');
+        $targetId = (string) ($payload['action_id'] ?? '');
+        $statement = $database->prepare('SELECT action_id, result FROM processed_actions WHERE session_id = :session AND actor_user_id = :actor AND action_id = :action');
+        $statement->execute(['session' => $session['id'], 'actor' => $user['id'], 'action' => $targetId]);
+        $target = $statement->fetch();
+        if (!is_array($target)) throw new RuntimeException('Undo target is unavailable.');
+        $result = json_decode((string) $target['result'], true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($result) || !is_array($result['undo'] ?? null)) throw new RuntimeException('That action cannot be undone.');
+        $inverse = $result['undo'];
+        $cardId = (string) ($inverse['card_id'] ?? '');
+        $card = $database->prepare("SELECT id, location_type, x, y, rotation, z_index, face_state, owner_user_id, locked_by, version FROM session_cards WHERE session_id = :session AND id = :id FOR UPDATE");
+        $card->execute(['session' => $session['id'], 'id' => $cardId]);
+        $current = $card->fetch();
+        if (!is_array($current) || $current['location_type'] !== 'table') throw new RuntimeException('Undo target is no longer on the table.');
+        if ($current['locked_by'] !== null && (string) $current['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.');
+        if ((int) $current['version'] !== (int) ($inverse['expected_version'] ?? -1)) throw new RuntimeException('The card changed; undo is no longer safe.');
+        $previous = $inverse['previous'] ?? null;
+        if (!is_array($previous)) throw new RuntimeException('Undo target is invalid.');
+        $database->prepare('UPDATE session_cards SET x=:x, y=:y, rotation=:rotation, z_index=:z, face_state=:face, owner_user_id=:owner, version=version+1 WHERE id=:id')
+            ->execute(['x' => $previous['x'], 'y' => $previous['y'], 'rotation' => $previous['rotation'], 'z' => $previous['z_index'], 'face' => $previous['face_state'], 'owner' => $previous['owner_user_id'], 'id' => $cardId]);
+        return ['undone_action_id' => $targetId, 'card_id' => $cardId, 'version' => (int) $current['version'] + 1];
+    }
+
     public static function captureInitialState(PDO $database, string $sessionId, array $configuration): void
     {
         $session = $database->prepare("SELECT status FROM sessions WHERE id = :id FOR UPDATE");
@@ -296,7 +322,7 @@ final class ActionService
             if (is_array($value)) {
                 $clean = [];
                 foreach ($value as $key => $item) {
-                    if (in_array((string) $key, ['card_id', 'card_ids', 'card_definition_id', 'cards', 'secret', 'token'], true)) continue;
+                    if (in_array((string) $key, ['card_id', 'card_ids', 'card_definition_id', 'cards', 'secret', 'token', 'owner_user_id', 'undo'], true)) continue;
                     $clean[$key] = $sanitize($item);
                 }
                 return $clean;

@@ -223,11 +223,13 @@ final class CardService
         self::assertCanControl($card, $member);
         if (!in_array($card['location_type'], ['table', 'hand'], true)) throw new RuntimeException('Only table or own-hand cards can change face state.');
         if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards have spatial positions.');
+        $previous = ['x' => (float) $card['x'], 'y' => (float) $card['y'], 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'owner_user_id' => $card['owner_user_id'] !== null ? (string) $card['owner_user_id'] : null];
         $nextX = (float) ($payload['x'] ?? $card['x']); $nextY = (float) ($payload['y'] ?? $card['y']);
         $database->prepare('UPDATE session_cards SET x = :x, y = :y, rotation = :rotation, z_index = :z, version = version + 1 WHERE id = :id')
             ->execute(['x' => $nextX, 'y' => $nextY, 'rotation' => (float) ($payload['rotation'] ?? $card['rotation']), 'z' => (int) ($payload['z_index'] ?? $card['z_index']), 'id' => $card['id']]);
         self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY, (string) $member['user_id']);
-        return ['card_id' => (string) $card['id'], 'x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y'])];
+        $current = $database->prepare('SELECT version FROM session_cards WHERE id = :id'); $current->execute(['id' => $card['id']]);
+        return ['card_id' => (string) $card['id'], 'x' => $nextX, 'y' => $nextY, 'undo' => ['card_id' => (string) $card['id'], 'previous' => $previous, 'expected_version' => (int) $current->fetchColumn()]];
     }
 
     public static function rotateCard(PDO $database, array $session, array $member, array $payload): array
@@ -237,10 +239,11 @@ final class CardService
         self::assertVersion($card, $payload);
         self::assertCanControl($card, $member);
         if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards can rotate.');
+        $previous = ['x' => (float) $card['x'], 'y' => (float) $card['y'], 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'owner_user_id' => $card['owner_user_id'] !== null ? (string) $card['owner_user_id'] : null];
         $rotation = (float) ($payload['rotation'] ?? $card['rotation']);
         if (!is_finite($rotation) || $rotation < -3600 || $rotation > 3600) throw new RuntimeException('Card rotation is invalid.');
         $database->prepare('UPDATE session_cards SET rotation = :rotation, version = version + 1 WHERE id = :id')->execute(['rotation' => $rotation, 'id' => $card['id']]);
-        return ['card_id' => (string) $card['id'], 'rotation' => $rotation];
+        return ['card_id' => (string) $card['id'], 'rotation' => $rotation, 'undo' => ['card_id' => (string) $card['id'], 'previous' => $previous, 'expected_version' => (int) $card['version'] + 1]];
     }
 
     public static function face(PDO $database, array $session, array $member, string $operation, array $payload): array

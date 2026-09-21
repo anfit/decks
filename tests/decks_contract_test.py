@@ -29,6 +29,8 @@ class DecksContractTest(unittest.TestCase):
         card_source = read_text("src/CardService.php")
         self.assertIn("owner_private", card_source)
         self.assertIn("isOwnPrivateTable", action_source)
+        self.assertIn("'undo_action'", action_source)
+        self.assertIn("The card changed; undo is no longer safe.", action_source)
         migration = read_text("migrations/004_mats_and_presets.sql")
         self.assertIn("CREATE TABLE table_presets", migration)
 
@@ -46,6 +48,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertNotIn("'payload' => json_decode((string) $row['public_payload']", source)
         self.assertIn("sanitizeEvent($type, $result)", source)
         self.assertIn("'card_definition_id', 'cards'", source)
+        self.assertIn("'owner_user_id', 'undo'", source)
         card_source = read_text("src/CardService.php")
         self.assertIn("applyZoneEffect", card_source)
         self.assertIn("Overlapping zones have conflicting effects", card_source)
