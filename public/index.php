@@ -292,8 +292,17 @@ header('Cache-Control: no-store');
     <title>Decks</title>
   </head>
   <body>
-    <?php foreach ($styles as $style): ?><link rel="stylesheet" href="/assets-build/<?= htmlspecialchars($style, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"><?php endforeach; ?>
     <?php if (is_string($entry)): ?>
+      <?php foreach ($styles as $style): ?><link rel="stylesheet" href="/assets-build/<?= htmlspecialchars($style, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"><?php endforeach; ?>
+      <main id="app" aria-live="polite">
+        <section class="welcome" aria-labelledby="welcome-title">
+          <p class="eyebrow">Decks</p>
+          <h1 id="welcome-title">A shared table for physical card play.</h1>
+          <p class="muted">Create a table or join one from an invitation.</p>
+          <div id="workspace"></div>
+          <p id="connection-status" class="status">Starting…</p>
+        </section>
+      </main>
       <script type="module" src="/assets-build/<?= htmlspecialchars($entry, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"></script>
     <?php else: ?>
       <main><h1>Decks</h1><p>Frontend assets are not built yet.</p></main>

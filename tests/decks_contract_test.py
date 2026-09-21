@@ -64,6 +64,12 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("pointerdown", source)
         self.assertIn("expected_card_version", source)
 
+    def test_production_shell_contains_frontend_mount_points(self) -> None:
+        source = read_text("public/index.php")
+        self.assertIn('id="workspace"', source)
+        self.assertIn('id="connection-status"', source)
+        self.assertIn('aria-labelledby="welcome-title"', source)
+
     def test_first_admin_bootstrap_supports_one_time_hash_migration(self) -> None:
         source = read_text("scripts/bootstrap-admin.php")
         self.assertIn("DECKS_ADMIN_PASSWORD_HASH", source)
