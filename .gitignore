@@ -4,3 +4,7 @@ vendor/
 .env
 .env.*
 !.env.example
+
+# Python test caches
+tests/__pycache__/
+*.pyc
