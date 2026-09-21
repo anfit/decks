@@ -7,6 +7,7 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 use Decks\InvitationService;
 use Decks\ActionService;
 use Decks\AssetService;
+use Decks\MatPresetService;
 use Decks\PasswordResetService;
 use Decks\RememberMe;
 use Decks\RealtimeTicket;
@@ -214,6 +215,17 @@ if (str_starts_with($path, '/api/')) {
         if ($path === '/api/assets' && $method === 'POST') {
             if (!isset($_FILES['asset']) || !is_array($_FILES['asset'])) json_response(['error' => 'asset_required'], 400);
             json_response(['asset' => AssetService::storeUpload($database, $user, $_FILES['asset'])], 201);
+        }
+        if ($path === '/api/mats' && $method === 'POST') {
+            $body = json_body();
+            json_response(['mat' => MatPresetService::createMat($database, $user, (string) ($body['name'] ?? ''), isset($body['background_asset_id']) ? (string) $body['background_asset_id'] : null, isset($body['width']) ? (int) $body['width'] : null, isset($body['height']) ? (int) $body['height'] : null, is_array($body['metadata'] ?? null) ? $body['metadata'] : [])], 201);
+        }
+        if ($path === '/api/mats-and-presets' && $method === 'GET') {
+            json_response(MatPresetService::listOwned($database, $user));
+        }
+        if ($path === '/api/presets' && $method === 'POST') {
+            $body = json_body();
+            json_response(['preset' => MatPresetService::createPreset($database, $user, (string) ($body['name'] ?? ''), (string) ($body['template_version_id'] ?? ''), isset($body['mat_version_id']) ? (string) $body['mat_version_id'] : null, is_array($body['configuration'] ?? null) ? $body['configuration'] : [])], 201);
         }
         if ($path === '/api/templates' && $method === 'POST') {
             $body = json_body();

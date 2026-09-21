@@ -19,6 +19,19 @@ class DecksContractTest(unittest.TestCase):
         for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'"):
             self.assertIn(action, source)
 
+    def test_mats_presets_and_private_zone_effects_are_authorized(self) -> None:
+        source = read_text("src/MatPresetService.php")
+        self.assertIn("createPreset", source)
+        self.assertIn("Preset template version is not available", source)
+        self.assertIn("normalizeConfiguration", source)
+        action_source = read_text("src/ActionService.php")
+        self.assertIn("normalizedPreset", action_source)
+        card_source = read_text("src/CardService.php")
+        self.assertIn("owner_private", card_source)
+        self.assertIn("isOwnPrivateTable", action_source)
+        migration = read_text("migrations/004_mats_and_presets.sql")
+        self.assertIn("CREATE TABLE table_presets", migration)
+
     def test_realtime_reauthenticates_and_checks_browser_origin(self) -> None:
         source = read_text("realtime/server.mjs")
         self.assertIn("allowedOrigin", source)
@@ -37,7 +50,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("applyZoneEffect", card_source)
         self.assertIn("Overlapping zones have conflicting effects", card_source)
         zone_source = read_text("src/ZoneService.php")
-        self.assertIn("['none', 'face_up', 'face_down', 'stack', 'align']", zone_source)
+        self.assertIn("['none', 'face_up', 'face_down', 'stack', 'align', 'fan', 'owner_private']", zone_source)
 
     def test_frontend_draws_from_authorized_container_projection(self) -> None:
         source = read_text("frontend/src/main.ts")

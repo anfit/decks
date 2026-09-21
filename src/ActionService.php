@@ -102,6 +102,7 @@ final class ActionService
         $cardProjection = [];
         foreach ($cards as $card) {
             $isOwnHand = $card['location_type'] === 'hand' && (string) $card['hand_participant_id'] === (string) $member['id'];
+            $isOwnPrivateTable = $card['location_type'] === 'table' && $card['face_state'] === 'private' && (string) $card['owner_user_id'] === (string) $userId;
             $isPublicFaceUp = ($card['location_type'] === 'table' || $card['location_type'] === 'pile') && $card['face_state'] === 'up';
             if ($card['location_type'] === 'deck' || $card['location_type'] === 'removed') continue;
             if ($card['location_type'] === 'hand' && !$isOwnHand) continue;
@@ -113,7 +114,7 @@ final class ActionService
                 'x' => $card['x'] !== null ? (float) $card['x'] : null, 'y' => $card['y'] !== null ? (float) $card['y'] : null,
                 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'version' => (int) $card['version'],
             ];
-            if ($isOwnHand || $isPublicFaceUp) $projected['card_definition_id'] = (string) $card['card_definition_id'];
+            if ($isOwnHand || $isOwnPrivateTable || $isPublicFaceUp) $projected['card_definition_id'] = (string) $card['card_definition_id'];
             $cardProjection[] = $projected;
         }
         return [
@@ -174,7 +175,7 @@ final class ActionService
             'reset_session' => self::resetSession($database, $session, $member, $payload),
             'create_zone' => ZoneService::create($database, $session, $member, $payload),
             'delete_zone' => ZoneService::delete($database, $session, $member, $payload),
-            'configure_table' => self::configureTable($database, $session, $member, $payload),
+            'configure_table' => self::configureTable($database, $session, $member, $user, $payload),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }
@@ -231,10 +232,21 @@ final class ActionService
         return ['reset' => true, 'shuffled' => ($payload['shuffle'] ?? false) === true, 'collected_cards' => $result['collected_cards']];
     }
 
-    private static function configureTable(PDO $database, array $session, array $member, array $payload): array
+    private static function configureTable(PDO $database, array $session, array $member, array $user, array $payload): array
     {
         if ($member['role'] !== 'host' || $session['status'] !== 'lobby') throw new RuntimeException('Only the host can configure a lobby.');
         $configuration = ['mat' => [], 'preset_id' => null];
+        $preset = null;
+        if (isset($payload['preset_id']) && $payload['preset_id'] !== null) {
+            $preset = MatPresetService::normalizedPreset($database, $user, (string) $payload['preset_id']);
+            $configuration = ['mat' => $preset['mat'], 'preset_id' => $preset['preset_id'], 'template_version_id' => $preset['template_version_id'], 'options' => $preset['configuration']['options'] ?? []];
+            $database->prepare('UPDATE sessions SET template_version_id = :template, preset_id = :preset WHERE id = :id')->execute(['template' => $preset['template_version_id'], 'preset' => $preset['preset_id'], 'id' => $session['id']]);
+            $database->prepare('DELETE FROM session_zones WHERE session_id = :session')->execute(['session' => $session['id']]);
+            $insertZone = $database->prepare('INSERT INTO session_zones(session_id, name, geometry, priority, behavior, owner_user_id) VALUES (:session, :name, CAST(:geometry AS jsonb), :priority, CAST(:behavior AS jsonb), :owner)');
+            foreach (($preset['configuration']['zones'] ?? []) as $zone) $insertZone->execute(['session' => $session['id'], 'name' => $zone['name'], 'geometry' => json_encode($zone['geometry'], JSON_THROW_ON_ERROR), 'priority' => $zone['priority'], 'behavior' => json_encode($zone['behavior'], JSON_THROW_ON_ERROR), 'owner' => $user['id']]);
+        } else {
+            $database->prepare('UPDATE sessions SET preset_id = NULL WHERE id = :id')->execute(['id' => $session['id']]);
+        }
         if (isset($payload['mat'])) {
             if (!is_array($payload['mat'])) throw new RuntimeException('Mat configuration is invalid.');
             $label = trim((string) ($payload['mat']['label'] ?? '')); $color = strtolower(trim((string) ($payload['mat']['color'] ?? '')));
@@ -243,7 +255,7 @@ final class ActionService
             $configuration['mat'] = array_filter(['label' => $label ?: null, 'color' => $color ?: null], static fn (mixed $value): bool => $value !== null);
         }
         if (isset($payload['preset_id']) && $payload['preset_id'] !== null && !preg_match('/^[0-9a-fA-F-]{36}$/', (string) $payload['preset_id'])) throw new RuntimeException('Preset reference is invalid.');
-        $configuration['preset_id'] = isset($payload['preset_id']) ? ($payload['preset_id'] === null ? null : (string) $payload['preset_id']) : null;
+        if ($preset === null) $configuration['preset_id'] = null;
         $database->prepare('UPDATE sessions SET access_settings = CAST(:settings AS jsonb) WHERE id = :id')->execute(['settings' => json_encode($configuration, JSON_THROW_ON_ERROR), 'id' => $session['id']]);
         return ['configuration' => $configuration];
     }

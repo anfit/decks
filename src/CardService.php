@@ -28,7 +28,7 @@ final class CardService
         $nextOrder = $target === 'hand' ? self::nextOrder($database, $session['id'], 'hand', (string) $member['id']) : ($target === 'pile' ? self::nextOrder($database, $session['id'], 'pile', (string) $targetPile['id']) : 0);
         $update = $database->prepare(
             "UPDATE session_cards SET location_type = :location, deck_id = NULL, pile_id = :pile, hand_participant_id = :hand,
-             order_key = :order_key, x = :x, y = :y, face_state = :face_state, version = version + 1
+             order_key = :order_key, x = :x, y = :y, face_state = :face_state, owner_user_id = NULL, version = version + 1
              WHERE id = :id",
         );
         $drawn = [];
@@ -42,7 +42,7 @@ final class CardService
                 'y' => $target === 'table' ? (float) ($payload['y'] ?? 0) + $index * 24 : null,
                 'face_state' => $face, 'id' => $card['id'],
             ]);
-            if ($location === 'table') self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0) + $index * 24, (float) ($payload['y'] ?? 0) + $index * 24);
+            if ($location === 'table') self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0) + $index * 24, (float) ($payload['y'] ?? 0) + $index * 24, (string) $member['user_id']);
             $drawn[] = ['id' => (string) $card['id'], 'location_type' => $location, 'face_state' => $face];
         }
         self::bumpDeck($database, $deckId);
@@ -169,7 +169,7 @@ final class CardService
             if (!is_array($item)) throw new RuntimeException('Card selection is invalid.');
             $card=self::card($database,$session['id'],(string)($item['card_id']??'')); self::assertVersion($card,$item); self::assertCanControl($card,$member); if($card['location_type']!=='table') throw new RuntimeException('Only table cards can move as a group.');
             $nextX = (float) ($item['x'] ?? $card['x']); $nextY = (float) ($item['y'] ?? $card['y']);
-            $update->execute(['x'=>$nextX,'y'=>$nextY,'rotation'=>(float)($item['rotation']??$card['rotation']),'z'=>(int)($item['z_index']??$card['z_index']),'id'=>$card['id']]); self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY); $moved[]=(string)$card['id'];
+            $update->execute(['x'=>$nextX,'y'=>$nextY,'rotation'=>(float)($item['rotation']??$card['rotation']),'z'=>(int)($item['z_index']??$card['z_index']),'id'=>$card['id']]); self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY, (string) $member['user_id']); $moved[]=(string)$card['id'];
         }
         return ['card_ids'=>$moved,'count'=>count($moved)];
     }
@@ -183,7 +183,7 @@ final class CardService
 
     public static function giveCards(PDO $database, array $session, array $member, array $payload): array
     {
-        self::assertPlayer($session,$member);$recipient=(string)($payload['recipient_participant_id']??'');$target=$database->prepare("SELECT id FROM session_participants WHERE session_id=:session AND id=:id AND removed_at IS NULL AND role IN ('host','player')");$target->execute(['session'=>$session['id'],'id'=>$recipient]);if(!$target->fetch())throw new RuntimeException('Recipient is invalid.');$ids=$payload['card_ids']??[];if(!is_array($ids)||count($ids)<1||count($ids)>100)throw new RuntimeException('Card selection is invalid.');$versions=is_array($payload['expected_card_versions']??null)?$payload['expected_card_versions']:[];$order=self::nextOrder($database,$session['id'],'hand',$recipient);$update=$database->prepare("UPDATE session_cards SET hand_participant_id=:participant,order_key=:order,face_state='private',version=version+1 WHERE id=:id");$moved=[];foreach($ids as $index=>$id){$card=self::card($database,$session['id'],(string)$id);if(array_key_exists((string)$id,$versions))self::assertVersion($card,['expected_card_version'=>$versions[(string)$id]]);if($card['location_type']!=='hand'||(string)$card['hand_participant_id']!==(string)$member['id'])throw new RuntimeException('Only your own hand cards can be given.');$update->execute(['participant'=>$recipient,'order'=>$order+(($index+1)*1000),'id'=>$card['id']]);$moved[]=(string)$card['id'];}self::normalizeHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],$recipient);return ['recipient_participant_id'=>$recipient,'card_count'=>count($moved)];
+        self::assertPlayer($session,$member);$recipient=(string)($payload['recipient_participant_id']??'');$target=$database->prepare("SELECT id FROM session_participants WHERE session_id=:session AND id=:id AND removed_at IS NULL AND role IN ('host','player')");$target->execute(['session'=>$session['id'],'id'=>$recipient]);if(!$target->fetch())throw new RuntimeException('Recipient is invalid.');$ids=$payload['card_ids']??[];if(!is_array($ids)||count($ids)<1||count($ids)>100)throw new RuntimeException('Card selection is invalid.');$versions=is_array($payload['expected_card_versions']??null)?$payload['expected_card_versions']:[];$order=self::nextOrder($database,$session['id'],'hand',$recipient);$update=$database->prepare("UPDATE session_cards SET hand_participant_id=:participant,order_key=:order,face_state='private',owner_user_id=NULL,version=version+1 WHERE id=:id");$moved=[];foreach($ids as $index=>$id){$card=self::card($database,$session['id'],(string)$id);if(array_key_exists((string)$id,$versions))self::assertVersion($card,['expected_card_version'=>$versions[(string)$id]]);if($card['location_type']!=='hand'||(string)$card['hand_participant_id']!==(string)$member['id'])throw new RuntimeException('Only your own hand cards can be given.');$update->execute(['participant'=>$recipient,'order'=>$order+(($index+1)*1000),'id'=>$card['id']]);$moved[]=(string)$card['id'];}self::normalizeHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],$recipient);return ['recipient_participant_id'=>$recipient,'card_count'=>count($moved)];
     }
 
     public static function peek(PDO $database, array $session, array $member, array $payload): array
@@ -191,7 +191,7 @@ final class CardService
         self::assertPlayer($session,$member);$card=self::card($database,$session['id'],(string)($payload['card_id']??''));if(!in_array($card['location_type'],['table','pile'],true)||$card['face_state']==='up')throw new RuntimeException('Only a face-down table or pile card can be peeked.');self::assertCanControl($card,$member);Security::audit($database,(string)$member['user_id'],'card.peek','session_card',(string)$card['id']);return ['card_id'=>(string)$card['id'],'card_definition_id'=>(string)$card['card_definition_id'],'expires_in_seconds'=>30];
     }
 
-    private static function applyZoneEffect(PDO $database, string $sessionId, string $cardId, float $x, float $y): void
+    private static function applyZoneEffect(PDO $database, string $sessionId, string $cardId, float $x, float $y, ?string $ownerUserId = null): void
     {
         $zones = $database->prepare('SELECT geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
         $zones->execute(['session' => $sessionId]); $matches = [];
@@ -199,10 +199,11 @@ final class CardService
             $geometry = json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR);
             $left = (float) ($geometry['x'] ?? 0); $top = (float) ($geometry['y'] ?? 0); $width = (float) ($geometry['width'] ?? 0); $height = (float) ($geometry['height'] ?? 0);
             if ($x < $left || $y < $top || $x > $left + $width || $y > $top + $height) continue;
-            $behavior = json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR); $matches[] = ['priority' => (int) $zone['priority'], 'effect' => (string) ($behavior['effect'] ?? 'none'), 'geometry' => $geometry];
+            $behavior = json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR); $matches[] = ['priority' => (int) $zone['priority'], 'area' => $width * $height, 'zone_id' => (string) $zone['id'], 'effect' => (string) ($behavior['effect'] ?? 'none'), 'geometry' => $geometry, 'behavior' => $behavior];
         }
         if ($matches === []) return;
-        $priority = $matches[0]['priority']; $selected = array_values(array_filter($matches, static fn (array $match): bool => $match['priority'] === $priority));
+        usort($matches, static fn (array $left, array $right): int => $left['priority'] !== $right['priority'] ? $right['priority'] <=> $left['priority'] : ($left['area'] <=> $right['area'] ?: strcmp($left['zone_id'], $right['zone_id']));
+        $priority = $matches[0]['priority']; $area = $matches[0]['area']; $selected = array_values(array_filter($matches, static fn (array $match): bool => $match['priority'] === $priority && abs($match['area'] - $area) < 0.000001));
         $effects = array_values(array_unique(array_map(static fn (array $match): string => $match['effect'], $selected)));
         if (count($effects) > 1) throw new RuntimeException('Overlapping zones have conflicting effects.');
         $effect = $effects[0];
@@ -210,6 +211,8 @@ final class CardService
         if ($effect === 'face_down') $database->prepare("UPDATE session_cards SET face_state='down', version=version+1 WHERE id=:id")->execute(['id'=>$cardId]);
         if ($effect === 'stack') $database->prepare('UPDATE session_cards SET z_index = z_index + 1, version = version + 1 WHERE id = :id')->execute(['id' => $cardId]);
         if ($effect === 'align') { $geometry = $selected[0]['geometry']; $centerX = (float) $geometry['x'] + (float) $geometry['width'] / 2; $centerY = (float) $geometry['y'] + (float) $geometry['height'] / 2; $database->prepare('UPDATE session_cards SET x=:x, y=:y, version=version+1 WHERE id=:id')->execute(['x'=>$centerX,'y'=>$centerY,'id'=>$cardId]); }
+        if ($effect === 'fan') { $geometry = $selected[0]['geometry']; $degrees = max(1.0, min(180.0, (float) ($selected[0]['behavior']['degrees'] ?? 30))); $center = (float) $geometry['x'] + (float) $geometry['width'] / 2; $ratio = (float) $geometry['width'] > 0 ? max(-1.0, min(1.0, ($x - $center) / ((float) $geometry['width'] / 2))) : 0.0; $database->prepare('UPDATE session_cards SET rotation=:rotation, version=version+1 WHERE id=:id')->execute(['rotation'=>$ratio*$degrees,'id'=>$cardId]); }
+        if ($effect === 'owner_private' && $ownerUserId !== null) $database->prepare("UPDATE session_cards SET face_state='private', owner_user_id=:owner, version=version+1 WHERE id=:id")->execute(['owner'=>$ownerUserId,'id'=>$cardId]);
     }
 
     public static function moveCard(PDO $database, array $session, array $member, array $payload): array
@@ -223,7 +226,7 @@ final class CardService
         $nextX = (float) ($payload['x'] ?? $card['x']); $nextY = (float) ($payload['y'] ?? $card['y']);
         $database->prepare('UPDATE session_cards SET x = :x, y = :y, rotation = :rotation, z_index = :z, version = version + 1 WHERE id = :id')
             ->execute(['x' => $nextX, 'y' => $nextY, 'rotation' => (float) ($payload['rotation'] ?? $card['rotation']), 'z' => (int) ($payload['z_index'] ?? $card['z_index']), 'id' => $card['id']]);
-        self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY);
+        self::applyZoneEffect($database, $session['id'], (string) $card['id'], $nextX, $nextY, (string) $member['user_id']);
         return ['card_id' => (string) $card['id'], 'x' => (float) ($payload['x'] ?? $card['x']), 'y' => (float) ($payload['y'] ?? $card['y'])];
     }
 
@@ -251,7 +254,7 @@ final class CardService
         self::assertCanControl($card, $member);
         if (!in_array($card['location_type'], ['table', 'pile'], true)) throw new RuntimeException('Only table or pile cards can move to a hand.');
         $order = self::nextOrder($database, $session['id'], 'hand', (string) $member['id']) + 1000;
-        $database->prepare("UPDATE session_cards SET location_type = 'hand', deck_id = NULL, pile_id = NULL, hand_participant_id = :hand, order_key = :order_key, x = NULL, y = NULL, face_state = 'private', version = version + 1 WHERE id = :id")
+        $database->prepare("UPDATE session_cards SET location_type = 'hand', deck_id = NULL, pile_id = NULL, hand_participant_id = :hand, order_key = :order_key, x = NULL, y = NULL, face_state = 'private', owner_user_id = NULL, version = version + 1 WHERE id = :id")
             ->execute(['hand' => $member['id'], 'order_key' => $order, 'id' => $card['id']]);
         self::bumpHand($database, $session['id'], (string) $member['id']);
         return ['card_id' => (string) $card['id'], 'hand_participant_id' => (string) $member['id']];
@@ -264,9 +267,9 @@ final class CardService
         self::assertVersion($card, $payload);
         if ($card['location_type'] !== 'hand' || (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('Only your own hand cards can be played.');
         $face = ($payload['face_state'] ?? 'down') === 'up' ? 'up' : 'down';
-        $database->prepare("UPDATE session_cards SET location_type = 'table', deck_id = NULL, pile_id = NULL, hand_participant_id = NULL, order_key = NULL, x = :x, y = :y, face_state = :face, version = version + 1 WHERE id = :id")
+        $database->prepare("UPDATE session_cards SET location_type = 'table', deck_id = NULL, pile_id = NULL, hand_participant_id = NULL, order_key = NULL, x = :x, y = :y, face_state = :face, owner_user_id = NULL, version = version + 1 WHERE id = :id")
             ->execute(['x' => (float) ($payload['x'] ?? 0), 'y' => (float) ($payload['y'] ?? 0), 'face' => $face, 'id' => $card['id']]);
-        self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0), (float) ($payload['y'] ?? 0));
+        self::applyZoneEffect($database, $session['id'], (string) $card['id'], (float) ($payload['x'] ?? 0), (float) ($payload['y'] ?? 0), (string) $member['user_id']);
         self::normalizeHand($database, $session['id'], (string) $member['id']);
         self::bumpHand($database, $session['id'], (string) $member['id']);
         return ['card_id' => (string) $card['id'], 'face_state' => $face];
@@ -289,7 +292,7 @@ final class CardService
         foreach ($moving as $index => $card) {
             if ($card['location_type'] === 'deck') throw new RuntimeException('Cards already in a deck cannot be selected by identity.');
             $sourceContainers[$card['location_type'] . ':' . ($card['pile_id'] ?? $card['hand_participant_id'] ?? $card['deck_id'] ?? '')] = true;
-            $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = :deck, pile_id = NULL, hand_participant_id = NULL, order_key = :temp_order, x = NULL, y = NULL, face_state = 'down', version = version + 1 WHERE id = :id")
+                $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = :deck, pile_id = NULL, hand_participant_id = NULL, order_key = :temp_order, x = NULL, y = NULL, face_state = 'down', owner_user_id = NULL, version = version + 1 WHERE id = :id")
                 ->execute(['deck' => $deckId, 'temp_order' => -1000000 + $index, 'id' => $card['id']]);
         }
         $all = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key");
