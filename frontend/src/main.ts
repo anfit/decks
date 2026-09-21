@@ -10,6 +10,7 @@ const status = document.querySelector<HTMLElement>("#connection-status");
 let csrf = "";
 let currentState: State | null = null;
 let socket: WebSocket | null = null;
+let realtimeRetry = 0;
 
 function setStatus(message: string, state: "ok" | "error" | "pending" = "pending"): void {
   if (!status) return;
@@ -184,11 +185,12 @@ async function refreshTable(sessionId: string): Promise<void> { const result = a
 
 function connectRealtime(sessionId: string): void {
   void api(`/api/sessions/${sessionId}/realtime-ticket`, { method: "POST" }).then((result) => {
+    realtimeRetry = 0;
     socket?.close(); const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(`${protocol}//${location.host}/ws?ticket=${encodeURIComponent(result.ticket as string)}`);
     socket.addEventListener("message", (event) => { const message = JSON.parse(event.data as string) as { type?: string }; if (message.type === "session_changed") void refreshTable(sessionId); });
-    socket.addEventListener("close", () => setStatus("Realtime connection closed; refresh to reconnect", "error"));
-  }).catch((error: unknown) => setStatus(`Realtime unavailable: ${(error as Error).message}`, "error"));
+    socket.addEventListener("close", () => { setStatus("Realtime connection closed; retrying", "error"); const delay = Math.min(30000, 1000 * 2 ** realtimeRetry++); window.setTimeout(() => connectRealtime(sessionId), delay); });
+  }).catch((error: unknown) => { setStatus(`Realtime unavailable: ${(error as Error).message}`, "error"); const delay = Math.min(30000, 1000 * 2 ** realtimeRetry++); window.setTimeout(() => connectRealtime(sessionId), delay); });
 }
 
 async function openTable(sessionId: string): Promise<void> { try { await refreshTable(sessionId); } catch (error) { setStatus((error as Error).message, "error"); } }

@@ -9,6 +9,7 @@ if (!match) throw new Error("DECKS_REALTIME_BIND must be a loopback IPv4 address
 const port = Number(match[1]);
 const signingKey = process.env.DECKS_REALTIME_SIGNING_KEY ?? "";
 if (signingKey.length < 32) throw new Error("DECKS_REALTIME_SIGNING_KEY must contain at least 32 bytes");
+const allowedOrigin = process.env.DECKS_PUBLIC_BASE_URL ?? "https://decks.mmanir.pl";
 const dbConfig = {
   host: process.env.DECKS_REALTIME_DB_HOST ?? process.env.DECKS_DB_HOST ?? "127.0.0.1",
   port: Number(process.env.DECKS_REALTIME_DB_PORT ?? process.env.DECKS_DB_PORT ?? 5432),
@@ -68,6 +69,16 @@ async function startListener() {
   listenerReady = true;
 }
 
+async function maintainListener() {
+  let delay = 1000;
+  for (;;) {
+    if (!listenerReady) {
+      try { await startListener(); delay = 1000; }
+      catch (error) { console.error(`decks-realtime listener reconnect unavailable: ${error.message}`); await new Promise((resolve) => setTimeout(resolve, delay)); delay = Math.min(delay * 2, 30000); }
+    } else await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+}
+
 const server = http.createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
@@ -86,6 +97,7 @@ wss.on("connection", (socket, payload) => {
   clients.add(socket);
   socket.send(JSON.stringify({ type: "ready", session_id: payload.session_id }));
   const heartbeat = setInterval(() => { if (socket.readyState === 1) socket.ping(); }, 30000);
+  const authorizationCheck = setInterval(async () => { if (socket.readyState === 1 && !(await authorized(payload))) socket.close(4003, "revoked"); }, 30000);
   socket.on("message", (data) => {
     const now = Date.now();
     socket.messages = socket.messages.filter((at) => now - at < 1000);
@@ -96,13 +108,14 @@ wss.on("connection", (socket, payload) => {
       if (message?.type === "ping") socket.send(JSON.stringify({ type: "pong" }));
     } catch { socket.close(1003, "invalid_message"); }
   });
-  socket.on("close", () => { clients.delete(socket); clearInterval(heartbeat); });
+  socket.on("close", () => { clients.delete(socket); clearInterval(heartbeat); clearInterval(authorizationCheck); });
 });
 
 server.on("upgrade", async (request, socket, head) => {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname !== "/ws") throw new Error("not_found");
+    if (request.headers.origin && request.headers.origin !== allowedOrigin) throw new Error("origin");
     const payload = verifyTicket(url.searchParams.get("ticket"));
     if (!payload || !(await authorized(payload))) throw new Error("unauthorized");
     wss.handleUpgrade(request, socket, head, (webSocket) => wss.emit("connection", webSocket, payload));
@@ -115,6 +128,7 @@ server.on("upgrade", async (request, socket, head) => {
 server.listen(port, "127.0.0.1", async () => {
   console.log(`decks-realtime listening on ${bind}`);
   try { await startListener(); } catch (error) { console.error(`decks-realtime database listener unavailable: ${error.message}`); }
+  void maintainListener();
 });
 
 async function shutdown() {

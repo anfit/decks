@@ -17,6 +17,13 @@ class DecksContractTest(unittest.TestCase):
         source = read_text("src/ActionService.php")
         for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'"):
             self.assertIn(action, source)
+
+    def test_realtime_reauthenticates_and_checks_browser_origin(self) -> None:
+        source = read_text("realtime/server.mjs")
+        self.assertIn("allowedOrigin", source)
+        self.assertIn("request.headers.origin", source)
+        self.assertIn("authorizationCheck", source)
+        self.assertIn("maintainListener", source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
 
     def test_changes_endpoint_never_replays_raw_action_payloads(self) -> None:
