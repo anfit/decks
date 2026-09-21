@@ -97,6 +97,14 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("RateLimiter::consume", read_text("public/index.php"))
         self.assertIn("delivery_state = 'failed'", read_text("scripts/send-mail-outbox.php"))
 
+    def test_retention_entrypoint_is_read_only_by_default_and_confirmation_gated(self) -> None:
+        source = read_text("scripts/retention.php")
+        self.assertIn("DECKS_RETENTION_CONFIRM=apply", source)
+        self.assertIn("$apply = in_array('--apply', $argv, true)", source)
+        self.assertIn("DECKS_RETENTION_ALLOW_SESSION_DELETE", source)
+        self.assertIn("body = '[redacted]'", source)
+        self.assertIn("scripts/retention.php", read_text(".deployer/retention.sh"))
+
     def test_database_contract_keeps_session_scoped_card_foreign_keys(self) -> None:
         source = read_text("migrations/001_initial_schema.sql")
         self.assertIn("FOREIGN KEY (session_id, source_deck_id)", source)
