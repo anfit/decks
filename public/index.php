@@ -5,9 +5,11 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/src/bootstrap.php';
 
 use Decks\InvitationService;
+use Decks\ActionService;
 use Decks\PasswordResetService;
 use Decks\RememberMe;
 use Decks\Security;
+use Decks\SessionService;
 use function Decks\env_required;
 use function Decks\csrf_token;
 use function Decks\database;
@@ -153,10 +155,63 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
 }
 
 if (str_starts_with($path, '/api/')) {
-    http_response_code(404);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['error' => 'not_found'], JSON_THROW_ON_ERROR);
-    exit;
+    start_secure_session();
+    $database = database();
+    $user = Security::currentUser($database);
+    $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+    /** @param array<string,mixed> $body */
+    function json_response(array $body, int $status = 200): never
+    {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo json_encode($body, JSON_THROW_ON_ERROR);
+        exit;
+    }
+
+    function json_body(): array
+    {
+        $raw = file_get_contents('php://input');
+        if (!is_string($raw) || $raw === '') return [];
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    if ($path === '/api/me' && $method === 'GET') {
+        if ($user === null) json_response(['error' => 'authentication_required'], 401);
+        json_response(['user' => $user]);
+    }
+    if ($user === null) json_response(['error' => 'authentication_required'], 401);
+    try {
+        if ($method === 'POST') require_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
+        if ($path === '/api/sessions' && $method === 'POST') {
+            $body = json_body();
+            $created = SessionService::create($database, $user, isset($body['title']) ? (string) $body['title'] : null, isset($body['max_participants']) ? (int) $body['max_participants'] : 12);
+            json_response(['session' => $created], 201);
+        }
+        if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/join$#', $path, $matches) && $method === 'POST') {
+            $body = json_body();
+            $joined = SessionService::join($database, $user, (string) ($body['token'] ?? ''), (string) ($body['role'] ?? 'player'));
+            json_response(['membership' => $joined], 201);
+        }
+        if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/state$#', $path, $matches) && $method === 'GET') {
+            json_response(['state' => ActionService::snapshot($database, $matches[1], (string) $user['id'])]);
+        }
+        if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/changes$#', $path, $matches) && $method === 'GET') {
+            $after = filter_var($_GET['after'] ?? 0, FILTER_VALIDATE_INT);
+            if ($after === false || $after < 0) json_response(['error' => 'invalid_revision'], 400);
+            json_response(['changes' => ActionService::changes($database, $matches[1], (string) $user['id'], $after)]);
+        }
+        if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/actions$#', $path, $matches) && $method === 'POST') {
+            $result = ActionService::execute($database, $user, $matches[1], json_body());
+            json_response($result);
+        }
+        json_response(['error' => 'not_found'], 404);
+    } catch (Throwable $exception) {
+        $status = str_contains(strtolower($exception->getMessage()), 'authentication') ? 401 : 409;
+        json_response(['error' => 'request_rejected', 'message' => $exception->getMessage()], $status);
+    }
 }
 
 $assetManifest = dirname(__DIR__) . '/public/assets-build/.vite/manifest.json';
