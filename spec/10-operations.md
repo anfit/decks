@@ -59,4 +59,4 @@ Commit variable names, never values. Expected names include `DECKS_APP_KEY`, `DE
 
 ## Launch checks
 
-Before public launch, verify host prerequisites, A/AAAA records, existing TLS PEM paths, sender-domain verification/SPF/DKIM/DMARC, outbound SMTP delivery, internal and public routes, WebSocket HTTP 101, protected asset denial/delivery, account invite/reset flows, multi-user play/reconnect, logs without secrets/private card identity, backups and isolated restore. A repeat `vps-deployer plan` must be a no-op.
+The DNS A record for `decks.mmanir.pl` has been created. Before public launch, verify any AAAA record, existing TLS PEM paths, sender-domain verification/SPF/DKIM/DMARC, outbound SMTP delivery, internal and public routes, WebSocket HTTP 101, protected asset denial/delivery, account invite/reset flows, multi-user play/reconnect, logs without secrets/private card identity, backups and isolated restore. The temporary operator SMTP details are in the ignored `tmp/.env`; load them only into the current process or an approved secret store, never commit or print them. A repeat `vps-deployer plan` must be a no-op.

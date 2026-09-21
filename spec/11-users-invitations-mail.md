@@ -38,7 +38,7 @@ A global administrator does not automatically gain visibility into a private han
 - Password reset links are single-use, one hour by default, replace earlier unused links and revoke remember/OAuth-equivalent authentication artifacts on completion. Forgot-password requests have generic responses and rate limits to prevent account enumeration.
 - `email_outbox` is Decks-owned and inserted in the same transaction as invitation/reset mutations. The worker claims rows safely, sends via authenticated TLS SMTP (default implicit TLS/465), uses bounded exponential retry and exposes permanent/exhausted failures to admins.
 - Successful delivery redacts message bodies. Passwords, token secrets and token-bearing URLs never appear in audit details, application logs or deployment plans.
-- Development uses a local SMTP sink. Production requires separate Decks settings for public base URL, visible sender, SMTP host/port/security/username/password and any provider sender-domain verification. SPF/DKIM/DMARC and bounce/reply handling are operator-owned launch prerequisites.
+- Development uses a local SMTP sink. Production requires separate Decks settings for public base URL, visible sender, SMTP host/port/security/username/password and any provider sender-domain verification. The temporary operator values are kept in ignored `tmp/.env`; only variable names and loading instructions belong in tracked documentation. SPF/DKIM/DMARC and bounce/reply handling are operator-owned launch prerequisites.
 - Mail is at-least-once. Repeated delivery must not repeat account creation or token consumption. Restores pause the worker until queued messages and revoked credentials are reconciled; historical mail is never blindly resent.
 
 ## Table join and reconnection
