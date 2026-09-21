@@ -1,7 +1,6 @@
 tmp/
 node_modules/
 vendor/
-public/assets-build/
 .env
 .env.*
 !.env.example
