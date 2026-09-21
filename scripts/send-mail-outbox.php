@@ -37,7 +37,7 @@ do {
                      WHERE i.id = :invitation_id AND i.accepted_at IS NULL AND i.rescinded_at IS NULL
                        AND NOT EXISTS (SELECT 1 FROM email_outbox newer
                                        WHERE newer.user_invitation_id = i.id AND newer.id > :outbox_id
-                                         AND newer.sent_at IS NULL AND newer.claimed_at IS NULL)",
+                                         AND newer.sent_at IS NULL)",
                 )->execute(['invitation_id' => $claim['user_invitation_id'], 'outbox_id' => $claim['id']]);
             }
         } catch (Throwable $error) {

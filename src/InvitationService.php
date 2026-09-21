@@ -177,7 +177,7 @@ final class InvitationService
             $inviter = $database->prepare('SELECT id, role FROM app_user WHERE id = :id FOR UPDATE');
             $inviter->execute(['id' => $invite['inviter_user_id']]);
             $inviterRow = $inviter->fetch();
-            $restore = is_array($inviterRow) && $inviterRow['role'] === 'member' && $invite['credit_consumed'] && $invite['credit_restored_at'] === null;
+            $restore = is_array($inviterRow) && $invite['credit_consumed'] && $invite['credit_restored_at'] === null;
             if ($restore) {
                 $database->prepare('UPDATE app_user SET invitation_credits = invitation_credits + 1, updated_at = now() WHERE id = :id')
                     ->execute(['id' => $invite['inviter_user_id']]);
@@ -213,7 +213,7 @@ final class InvitationService
             $inviter = $database->prepare('SELECT id, role FROM app_user WHERE id = :id FOR UPDATE');
             $inviter->execute(['id' => $invite['inviter_user_id']]);
             $inviterRow = $inviter->fetch();
-            if (!is_array($inviterRow) || $inviterRow['role'] !== 'member') {
+            if (!is_array($inviterRow)) {
                 $database->rollBack();
                 return ['status' => 'unchanged'];
             }
