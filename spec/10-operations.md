@@ -57,6 +57,8 @@ Database migrations are expand/contract and backward-compatible across the retai
 
 Commit variable names, never values. Expected names include `DECKS_APP_KEY`, `DECKS_DB_PASSWORD`, `DECKS_REALTIME_DB_PASSWORD`, `DECKS_REALTIME_SIGNING_KEY`, `DECKS_SMTP_PASSWORD` and separately scoped bootstrap/migration credentials. Non-secret values include `DECKS_PUBLIC_BASE_URL=https://decks.mmanir.pl`, `DECKS_MAIL_FROM`, SMTP host/port/security/username and lifecycle limits.
 
+The realtime release carries the locked production `node_modules` tree because the current deployer has no build/install hook. Development-only packages remain present in the artifact for now; a later deployer build phase should replace this with a reproducible `npm ci --omit=dev` artifact before capacity-sensitive launch.
+
 ## Launch checks
 
 The DNS A record for `decks.mmanir.pl` has been created. Before public launch, verify any AAAA record, existing TLS PEM paths, sender-domain verification/SPF/DKIM/DMARC, outbound SMTP delivery, internal and public routes, WebSocket HTTP 101, protected asset denial/delivery, account invite/reset flows, multi-user play/reconnect, logs without secrets/private card identity, backups and isolated restore. The temporary operator SMTP details are in the ignored `tmp/.env`; load them only into the current process or an approved secret store, never commit or print them. A repeat `vps-deployer plan` must be a no-op.
