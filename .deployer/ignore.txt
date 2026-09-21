@@ -1,0 +1,12 @@
+.git/
+.idea/
+.env
+.env.*
+node_modules/
+vendor/
+tmp/
+tests/
+spec/
+frontend/node_modules/
+public/uploads/
+public/assets-build/.vite/deps/

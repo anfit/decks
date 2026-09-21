@@ -1,0 +1,32 @@
+{
+  "name": "anfit/decks",
+  "description": "Online shared card table",
+  "type": "project",
+  "require": {
+    "php": ">=8.2",
+    "ext-pdo": "*",
+    "ext-pdo_pgsql": "*",
+    "ext-json": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Decks\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Decks\\Tests\\": "tests/php/"
+    }
+  },
+  "scripts": {
+    "test": "phpunit",
+    "check": "php -l public/index.php && php -l src/bootstrap.php"
+  },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {}
+  }
+}

@@ -1,0 +1,9 @@
+commands:
+  bash: {}
+  node:
+    version: ">=20.20"
+  php:
+    version: ">=8.2"
+  psql: {}
+paths:
+  - /etc/nginx
