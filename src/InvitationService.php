@@ -45,7 +45,7 @@ final class InvitationService
             );
             $insert->execute([
                 'inviter' => $actor['id'], 'email' => $email, 'selector' => $token['selector'],
-                'secret_hash' => $token['hash'], 'days' => $days, 'credit_consumed' => $user['role'] !== 'admin',
+                'secret_hash' => $token['hash'], 'days' => $days, 'credit_consumed' => $user['role'] === 'admin' ? 'false' : 'true',
             ]);
             $row = $insert->fetch();
             if ($user['role'] !== 'admin') {
@@ -186,7 +186,7 @@ final class InvitationService
                 'UPDATE user_invitations SET active = false, rescinded_at = now(), delivery_state = \'rescinded\',
                  credit_restored_at = CASE WHEN CAST(:restore AS boolean) THEN now() ELSE credit_restored_at END,
                  credit_restored_by = CASE WHEN CAST(:restore AS boolean) THEN :actor ELSE credit_restored_by END WHERE id = :id',
-            )->execute(['restore' => $restore, 'actor' => $actor['id'], 'id' => $invitationId]);
+            )->execute(['restore' => $restore ? 'true' : 'false', 'actor' => $actor['id'], 'id' => $invitationId]);
             self::cancelPendingMail($database, $invitationId, 'Invitation rescinded.');
             Security::audit($database, (string) $actor['id'], 'account.invitation_rescinded', 'user_invitation', $invitationId, ['email' => (string) $invite['email']]);
             if ($restore) Security::audit($database, (string) $actor['id'], 'account.invitation_credit_restored', 'user_invitation', $invitationId, ['inviter_user_id' => (string) $invite['inviter_user_id']]);

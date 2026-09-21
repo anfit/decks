@@ -164,7 +164,7 @@ final class Security
             }
             if ((bool) $user['enabled'] !== $enabled) {
                 $database->prepare('UPDATE app_user SET enabled = :enabled, updated_at = now() WHERE id = :id')
-                    ->execute(['enabled' => $enabled, 'id' => $userId]);
+                    ->execute(['enabled' => $enabled ? 'true' : 'false', 'id' => $userId]);
                 if (!$enabled) self::revokeAuthentication($database, $userId);
                 self::audit($database, (string) $actor['id'], $enabled ? 'account.enabled' : 'account.disabled', 'app_user', $userId);
             }
