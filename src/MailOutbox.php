@@ -8,11 +8,18 @@ use PDO;
 
 final class MailOutbox
 {
-    public static function enqueue(PDO $database, string $kind, string $recipient, string $subject, string $body): void
+    public static function enqueue(PDO $database, string $kind, string $recipient, string $subject, string $body, ?string $userInvitationId = null): void
     {
         $statement = $database->prepare(
-            'INSERT INTO email_outbox(kind, recipient, subject, body) VALUES (:kind, :recipient, :subject, :body)',
+            'INSERT INTO email_outbox(kind, recipient, subject, body, user_invitation_id)
+             VALUES (:kind, :recipient, :subject, :body, :user_invitation_id)',
         );
-        $statement->execute(compact('kind', 'recipient', 'subject', 'body'));
+        $statement->execute([
+            'kind' => $kind,
+            'recipient' => $recipient,
+            'subject' => $subject,
+            'body' => $body,
+            'user_invitation_id' => $userInvitationId,
+        ]);
     }
 }

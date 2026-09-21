@@ -11,6 +11,7 @@ use Decks\MatPresetService;
 use Decks\PasswordResetService;
 use Decks\RememberMe;
 use Decks\RealtimeTicket;
+use Decks\RateLimiter;
 use Decks\Security;
 use Decks\SessionService;
 use Decks\TemplateService;
@@ -63,7 +64,10 @@ function set_remember_cookie(string $value): void
     setcookie(remember_cookie_name(), $value, ['expires' => time() + 60 * 60 * 24 * 60, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
 }
 
-if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', '/reset-password', '/logout', '/account/invite'], true)) {
+if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', '/reset-password', '/logout', '/logout-everywhere', '/account', '/account/invite', '/admin/users', '/admin/invitations'], true) ||
+    preg_match('#^/account/invitations/[0-9a-fA-F-]{36}/rescind$#', $path) ||
+    preg_match('#^/admin/invitations/[0-9a-fA-F-]{36}/(resend|rescind|restore-credit)$#', $path) ||
+    preg_match('#^/admin/users/[0-9a-fA-F-]{36}/(role|enabled|reset)$#', $path)) {
     start_secure_session();
     $database = database();
     if (!isset($_SESSION['user_id']) && isset($_COOKIE[remember_cookie_name()])) {
@@ -87,12 +91,27 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
         session_destroy();
         redirect_to('/');
     }
+    if ($path === '/logout-everywhere' && $method === 'POST') {
+        require_csrf($_POST['csrf_token'] ?? null);
+        $user = Security::currentUser($database);
+        if ($user === null) redirect_to('/login');
+        Security::signOutEverywhere($database, $user);
+        if (isset($_COOKIE[remember_cookie_name()])) RememberMe::revoke($database, (string) $_COOKIE[remember_cookie_name()]);
+        $_SESSION = [];
+        session_destroy();
+        redirect_to('/login?signed_out_everywhere=1');
+    }
     if ($path === '/login') {
         if ($method === 'POST') {
             try {
                 require_csrf($_POST['csrf_token'] ?? null);
-                $user = Security::authenticate($database, (string) ($_POST['email'] ?? ''), (string) ($_POST['password'] ?? ''));
+                $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+                $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+                $ipAllowed = RateLimiter::consume($database, 'login.ip', $ip, RateLimiter::LOGIN_IP_LIMIT, RateLimiter::LOGIN_WINDOW_SECONDS);
+                $emailAllowed = RateLimiter::consume($database, 'login.email', $email, RateLimiter::LOGIN_EMAIL_LIMIT, RateLimiter::LOGIN_WINDOW_SECONDS);
+                $user = $ipAllowed && $emailAllowed ? Security::authenticate($database, $email, (string) ($_POST['password'] ?? '')) : null;
                 if ($user === null) throw new RuntimeException('Email or password is incorrect.');
+                RateLimiter::clear($database, 'login.email', $email);
                 session_regenerate_id(true);
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['security_version'] = $user['security_version'];
@@ -125,7 +144,13 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
         if ($method === 'POST') {
             try {
                 require_csrf($_POST['csrf_token'] ?? null);
-                PasswordResetService::request($database, (string) ($_POST['email'] ?? ''), getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240');
+                $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+                $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+                $ipAllowed = RateLimiter::consume($database, 'password-reset.ip', $ip, RateLimiter::RESET_IP_LIMIT, RateLimiter::RESET_WINDOW_SECONDS);
+                $emailAllowed = RateLimiter::consume($database, 'password-reset.email', $email, RateLimiter::RESET_EMAIL_LIMIT, RateLimiter::RESET_WINDOW_SECONDS);
+                if ($ipAllowed && $emailAllowed) {
+                    PasswordResetService::request($database, $email, getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240');
+                }
             } catch (Throwable $exception) { /* Deliberately generic to prevent account enumeration. */ }
             page('Check your email · Decks', '<h1>Check your email</h1><p>If an enabled account matches that address, a reset link will arrive shortly.</p>');
         }
@@ -143,18 +168,103 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
         $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
         page('Choose a new password · Decks', '<h1>Choose a new password</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="token" value="' . h($token) . '"><label>New password<input name="password" type="password" autocomplete="new-password" minlength="16" required></label><button>Save password</button></form>');
     }
-    if ($path === '/account/invite') {
+    $baseUrl = getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240';
+    if ($path === '/account' || $path === '/account/invite' || preg_match('#^/account/invitations/([0-9a-fA-F-]{36})/rescind$#', $path, $accountInvitation)) {
         $user = Security::currentUser($database);
-        if ($user === null) redirect_to('/login?next=%2Faccount%2Finvite');
+        if ($user === null) redirect_to('/login?next=%2Faccount');
         if ($method === 'POST') {
             try {
                 require_csrf($_POST['csrf_token'] ?? null);
-                InvitationService::create($database, $user, (string) ($_POST['email'] ?? ''), getenv('DECKS_PUBLIC_BASE_URL') ?: 'http://127.0.0.1:5240');
-                page('Invitation sent · Decks', '<h1>Invitation queued</h1><p>The invitation has been queued for delivery.</p><p><a href="/account/invite">Invite another person</a></p>');
+                if ($path === '/account/invite') {
+                    InvitationService::create($database, $user, (string) ($_POST['email'] ?? ''), $baseUrl);
+                    page('Invitation queued · Decks', '<h1>Invitation queued</h1><p>The invitation has been queued for delivery.</p><p><a href="/account">Return to account</a></p>');
+                }
+                if (isset($accountInvitation[1])) {
+                    InvitationService::rescind($database, $user, $accountInvitation[1]);
+                    redirect_to('/account');
+                }
+                if ($path === '/account' && ($_POST['action'] ?? '') === 'change_password') {
+                    Security::changePassword($database, $user, (string) ($_POST['current_password'] ?? ''), (string) ($_POST['password'] ?? ''), (string) ($_POST['password_confirmation'] ?? ''));
+                    $_SESSION = [];
+                    session_destroy();
+                    redirect_to('/login?password_changed=1');
+                }
             } catch (Throwable $exception) { $error = $exception->getMessage(); }
         }
+        if ($path === '/account/invite') {
+            $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
+            page('Invite someone · Decks', '<h1>Invite someone to Decks</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" autocomplete="email" required></label><button>Queue invitation</button></form><p><a href="/account">Return to account</a></p>');
+        }
+        if (isset($accountInvitation[1])) {
+            page('Invitation · Decks', '<h1>Invitation</h1><p class="error">' . h($error ?? 'The invitation could not be rescinded.') . '</p><p><a href="/account">Return to account</a></p>');
+        }
+        $record = Security::accountRecord($database, (string) $user['id']);
+        $issued = InvitationService::listIssued($database, (string) $user['id']);
         $message = $error ? '<p class="error">' . h($error) . '</p>' : '';
-        page('Invite someone · Decks', '<h1>Invite someone to Decks</h1>' . $message . '<form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" autocomplete="email" required></label><button>Queue invitation</button></form>');
+        $invitationRows = '';
+        foreach ($issued as $invitation) {
+            $invitationRows .= '<li>' . h((string) $invitation['email']) . ' · ' . h((string) $invitation['status']) . ' · delivery ' . h((string) $invitation['delivery_state']);
+            if ($invitation['status'] === 'pending') {
+                $invitationRows .= '<form method="post" action="/account/invitations/' . h((string) $invitation['id']) . '/rescind"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Rescind</button></form>';
+            }
+            $invitationRows .= '</li>';
+        }
+        if ($invitationRows === '') $invitationRows = '<li>No invitations issued.</li>';
+        page('Account · Decks', '<h1>Account</h1>' . $message . '<p><strong>Email:</strong> ' . h((string) ($record['email'] ?? $user['email'])) . '<br><strong>Role:</strong> ' . h((string) ($record['role'] ?? $user['role'])) . '<br><strong>Invitation credits:</strong> ' . h((string) ($record['role'] === 'admin' ? 'unlimited' : ($record['invitation_credits'] ?? 0))) . '</p><p><a href="/account/invite">Invite someone</a> · <a href="/">Decks</a></p><h2>Issued invitations</h2><ul>' . $invitationRows . '</ul><h2>Security</h2><form method="post"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="action" value="change_password"><label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label><label>New password<input name="password" type="password" minlength="16" autocomplete="new-password" required></label><label>Confirm new password<input name="password_confirmation" type="password" minlength="16" autocomplete="new-password" required></label><button>Change password</button></form><form method="post" action="/logout-everywhere"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Sign out everywhere</button></form>');
+    }
+
+    if ($path === '/admin/users' || $path === '/admin/invitations' || preg_match('#^/admin/invitations/([0-9a-fA-F-]{36})/(resend|rescind|restore-credit)$#', $path, $adminInvitation) || preg_match('#^/admin/users/([0-9a-fA-F-]{36})/(role|enabled|reset)$#', $path, $adminUser)) {
+        $user = Security::currentUser($database);
+        if ($user === null) redirect_to('/login?next=%2Fadmin%2Fusers');
+        try {
+            Security::requireCapability($user, 'users.manage');
+            if ($method === 'POST') {
+                require_csrf($_POST['csrf_token'] ?? null);
+                if ($path === '/admin/invitations') {
+                    InvitationService::create($database, $user, (string) ($_POST['email'] ?? ''), $baseUrl);
+                    $notice = 'Invitation queued.';
+                } elseif (isset($adminInvitation[1])) {
+                    $result = match ($adminInvitation[2]) {
+                        'resend' => InvitationService::resend($database, $user, $adminInvitation[1], $baseUrl),
+                        'rescind' => InvitationService::rescind($database, $user, $adminInvitation[1]),
+                        default => InvitationService::restoreCredit($database, $user, $adminInvitation[1]),
+                    };
+                    $notice = 'Invitation operation: ' . (string) ($result['status'] ?? 'complete') . '.';
+                } elseif (isset($adminUser[1])) {
+                    $target = $adminUser[1];
+                    $operation = $adminUser[2];
+                    if ($operation === 'role') Security::setRole($database, $user, $target, (string) ($_POST['role'] ?? 'member'));
+                    elseif ($operation === 'enabled') Security::setEnabled($database, $user, $target, (string) ($_POST['enabled'] ?? '0') === '1');
+                    else PasswordResetService::requestForUser($database, $user, $target, $baseUrl);
+                    $notice = 'Account operation completed.';
+                }
+            }
+        } catch (Throwable $exception) { $error = $exception->getMessage(); }
+        $users = Security::listUsers($database);
+        $invitations = InvitationService::listAll($database);
+        $message = $error ? '<p class="error">' . h($error) . '</p>' : (($notice ?? null) ? '<p>' . h($notice) . '</p>' : '');
+        $userRows = '';
+        foreach ($users as $managed) {
+            $id = h((string) $managed['id']);
+            $role = (string) $managed['role'];
+            $enabled = (bool) $managed['enabled'];
+            $userRows .= '<li><strong>' . h((string) $managed['email']) . '</strong> · ' . h($role) . ' · ' . ($enabled ? 'enabled' : 'disabled') . ' · credits ' . h((string) $managed['invitation_credits']) . '<form method="post" action="/admin/users/' . $id . '/role"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><select name="role"><option value="member"' . ($role === 'member' ? ' selected' : '') . '>member</option><option value="admin"' . ($role === 'admin' ? ' selected' : '') . '>admin</option></select><button>Set role</button></form><form method="post" action="/admin/users/' . $id . '/enabled"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><input type="hidden" name="enabled" value="' . ($enabled ? '0' : '1') . '"><button>' . ($enabled ? 'Disable' : 'Enable') . '</button></form><form method="post" action="/admin/users/' . $id . '/reset"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Email reset link</button></form></li>';
+        }
+        $inviteRows = '';
+        foreach ($invitations as $invitation) {
+            $id = h((string) $invitation['id']);
+            $inviteRows .= '<li>' . h((string) $invitation['email']) . ' · ' . h((string) $invitation['status']) . ' · delivery ' . h((string) $invitation['delivery_state']) . ' · inviter ' . h((string) ($invitation['inviter_email'] ?? 'unknown'));
+            if ($invitation['status'] === 'pending') {
+                $inviteRows .= '<form method="post" action="/admin/invitations/' . $id . '/resend"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Resend</button></form><form method="post" action="/admin/invitations/' . $id . '/rescind"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Rescind</button></form>';
+            }
+            if ((bool) $invitation['credit_consumed'] && $invitation['credit_restored_at'] === null && $invitation['status'] !== 'accepted') {
+                $inviteRows .= '<form method="post" action="/admin/invitations/' . $id . '/restore-credit"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><button>Restore credit</button></form>';
+            }
+            $inviteRows .= '</li>';
+        }
+        if ($userRows === '') $userRows = '<li>No users.</li>';
+        if ($inviteRows === '') $inviteRows = '<li>No invitations.</li>';
+        page('Users · Decks', '<h1>Users and invitations</h1>' . $message . '<p><a href="/account">Account</a> · <a href="/">Decks</a></p><h2>Invite user</h2><form method="post" action="/admin/invitations"><input type="hidden" name="csrf_token" value="' . h(csrf_token()) . '"><label>Email<input name="email" type="email" required></label><button>Queue invitation</button></form><h2>Users</h2><ul>' . $userRows . '</ul><h2>Invitations</h2><ul>' . $inviteRows . '</ul>');
     }
 }
 

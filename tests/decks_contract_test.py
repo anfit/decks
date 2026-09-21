@@ -76,6 +76,27 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("password_get_info", source)
         self.assertIn("$storedPasswordHash", source)
 
+    def test_account_administration_matches_reference_surface(self) -> None:
+        security = read_text("src/Security.php")
+        invitations = read_text("src/InvitationService.php")
+        routes = read_text("public/index.php")
+        self.assertIn("changePassword", security)
+        self.assertIn("setRole", security)
+        self.assertIn("setEnabled", security)
+        self.assertIn("protectFinalAdmin", security)
+        self.assertIn("signOutEverywhere", security)
+        for method in ("listIssued", "listAll", "resend", "rescind", "restoreCredit"):
+            self.assertIn(method, invitations)
+        for route in ("/account", "/logout-everywhere", "/admin/users", "/admin/invitations"):
+            self.assertIn(route, routes)
+
+    def test_account_security_has_rate_limits_and_outbox_linkage(self) -> None:
+        self.assertIn("request_rate_limits", read_text("migrations/005_account_administration.sql"))
+        self.assertIn("user_invitation_id", read_text("migrations/005_account_administration.sql"))
+        self.assertIn("class RateLimiter", read_text("src/RateLimiter.php"))
+        self.assertIn("RateLimiter::consume", read_text("public/index.php"))
+        self.assertIn("delivery_state = 'failed'", read_text("scripts/send-mail-outbox.php"))
+
     def test_database_contract_keeps_session_scoped_card_foreign_keys(self) -> None:
         source = read_text("migrations/001_initial_schema.sql")
         self.assertIn("FOREIGN KEY (session_id, source_deck_id)", source)

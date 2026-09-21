@@ -39,6 +39,36 @@ final class PasswordResetService
         }
     }
 
+    public static function requestForUser(PDO $database, array $actor, string $userId, string $baseUrl, int $hours = 1): void
+    {
+        Security::requireCapability($actor, 'users.manage');
+        $database->beginTransaction();
+        try {
+            $statement = $database->prepare('SELECT id, email, enabled FROM app_user WHERE id = :id FOR UPDATE');
+            $statement->execute(['id' => $userId]);
+            $user = $statement->fetch();
+            if (!is_array($user) || !$user['enabled']) throw new \RuntimeException('Enabled account is required.');
+            $database->prepare('DELETE FROM password_reset_tokens WHERE user_id = :user_id AND used_at IS NULL')
+                ->execute(['user_id' => $user['id']]);
+            $token = Token::issue();
+            $insert = $database->prepare(
+                "INSERT INTO password_reset_tokens(user_id, selector, secret_hash, expires_at)
+                 VALUES (:user_id, :selector, :secret_hash, now() + (:hours || ' hours')::interval)
+                 RETURNING id",
+            );
+            $insert->execute(['user_id' => $user['id'], 'selector' => $token['selector'], 'secret_hash' => $token['hash'], 'hours' => $hours]);
+            $row = $insert->fetch();
+            $link = rtrim($baseUrl, '/') . '/reset-password?token=' . rawurlencode($token['value']);
+            MailOutbox::enqueue($database, 'password_reset', (string) $user['email'], 'Reset your Decks password',
+                "Reset your Decks password: {$link}\n\nThis link expires in {$hours} hour(s).");
+            Security::audit($database, (string) $actor['id'], 'account.password_reset_requested_by_admin', 'password_reset', (string) $row['id'], ['user_id' => (string) $user['id']]);
+            $database->commit();
+        } catch (\Throwable $error) {
+            if ($database->inTransaction()) $database->rollBack();
+            throw $error;
+        }
+    }
+
     public static function consume(PDO $database, string $value, string $password): array
     {
         $parts = Token::split($value);
