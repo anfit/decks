@@ -260,9 +260,14 @@ if (str_starts_with($path, '/api/')) {
 
 $assetManifest = dirname(__DIR__) . '/public/assets-build/.vite/manifest.json';
 $entry = null;
+$styles = [];
 if (is_file($assetManifest)) {
     $manifest = json_decode((string) file_get_contents($assetManifest), true, 512, JSON_THROW_ON_ERROR);
-    $entry = $manifest['src/main.ts']['file'] ?? null;
+    $manifestEntry = $manifest['src/main.ts'] ?? $manifest['index.html'] ?? null;
+    if (is_array($manifestEntry)) {
+        $entry = isset($manifestEntry['file']) && is_string($manifestEntry['file']) ? $manifestEntry['file'] : null;
+        $styles = array_values(array_filter($manifestEntry['css'] ?? [], 'is_string'));
+    }
 }
 
 header('Content-Type: text/html; charset=utf-8');
@@ -275,6 +280,7 @@ header('Cache-Control: no-store');
     <title>Decks</title>
   </head>
   <body>
+    <?php foreach ($styles as $style): ?><link rel="stylesheet" href="/assets-build/<?= htmlspecialchars($style, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"><?php endforeach; ?>
     <?php if (is_string($entry)): ?>
       <script type="module" src="/assets-build/<?= htmlspecialchars($entry, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"></script>
     <?php else: ?>
