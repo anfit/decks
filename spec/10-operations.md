@@ -51,6 +51,8 @@ All network listeners bind loopback. A dedicated non-root account is used per in
 
 The deployer health URL is `http://127.0.0.1:<internal-web-port>/health`, so it tests Nginx plus PHP-FPM, not PHP-FPM directly. Node has a local readiness check used by its service/diagnostics. A release is healthy only after the migration compatibility check, PHP response, protected-asset route, Node readiness and public proxy configuration have been checked.
 
+The current `prod` host uses PostgreSQL 18 on loopback. Decks application and mail-worker manifests set the non-secret `PGSSLMODE=disable` value explicitly because the local PostgreSQL policy authenticates the service roles without TLS; credentials remain in the deployment environment file. This is a host-local connection setting and must be revalidated if PostgreSQL or the network boundary changes.
+
 Database migrations are expand/contract and backward-compatible across the retained application/Node/mail release set. Deployer rollback does not reverse migrations, sent mail, DNS, certificates or external side effects. The previous compatible release remains available until the complete activation and public smoke tests pass.
 
 ## Secrets and environment

@@ -56,6 +56,6 @@ Different sessions may proceed concurrently. Stale dependency versions produce a
 
 ## Local and production runtime
 
-The current Windows shell has Node `20.20.0` and PostgreSQL client `14.5`; PHP is not installed in that shell. Local PHP/FPM integration therefore uses WSL/Linux or an equivalent pinned environment. The OVH host currently provides Node `20.19.4`; the realtime bridge supports the 20.x line from `20.19` upward. Production prerequisites must assert PHP `>=8.2`, PostgreSQL and Node versions actually installed on `prod`; they must not be guessed from this workstation.
+The current Windows shell has Node `20.20.0` and PostgreSQL client `14.5`; PHP is not installed in that shell. Local PHP/FPM integration therefore uses WSL/Linux or an equivalent pinned environment. The verified OVH production host now provides Node `24.21.0`/npm `11.19.0`, PHP `8.5.4` with PHP-FPM 8.5, and PostgreSQL `18.6`; the realtime bridge continues to support the declared Node `>=20.19` contract. Production prerequisites must assert PHP, PostgreSQL and Node versions actually installed on `prod`; they must not be guessed from this workstation.
 
 The initial renderer is DOM-based with absolutely positioned cards and CSS transforms. Canvas/WebGL, Redis, an external queue, containers, a CDN and multiple application nodes are deferred until measured need.
