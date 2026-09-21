@@ -37,7 +37,7 @@ final class ActionService
             if (!is_array($session)) throw new RuntimeException('Session not found.');
             $member = SessionService::membership($database, $sessionId, (string) $user['id']);
             if ($member === null) throw new RuntimeException('Active table membership required.');
-            if ($session['status'] === 'ended' && $type !== 'leave_session') throw new RuntimeException('Session has ended.');
+            if ($session['status'] === 'ended' && !in_array($type, ['leave_session', 'reset_session'], true)) throw new RuntimeException('Session has ended.');
             if (array_key_exists('expected_session_revision', $request) && $request['expected_session_revision'] !== null && (int) $request['expected_session_revision'] !== (int) $session['revision']) {
                 throw new RuntimeException('Session changed; refresh and try again.');
             }
@@ -79,16 +79,33 @@ final class ActionService
         $hands->execute(['session' => $sessionId]);
         $handCounts = [];
         foreach ($hands as $hand) $handCounts[(string) $hand['participant_id']] = (int) $hand['card_count'];
-        $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, order_key, x, y, rotation, z_index, face_state, owner_user_id, version FROM session_cards WHERE session_id = :session');
+        $containers = $database->prepare(
+            "SELECT location_type, deck_id, pile_id, count(*) AS card_count
+             FROM session_cards
+             WHERE session_id = :session AND location_type IN ('deck', 'pile')
+             GROUP BY location_type, deck_id, pile_id
+             ORDER BY location_type, deck_id, pile_id",
+        );
+        $containers->execute(['session' => $sessionId]);
+        $containerProjection = ['decks' => [], 'piles' => []];
+        foreach ($containers as $container) {
+            $type = (string) $container['location_type'];
+            $id = $type === 'deck' ? (string) $container['deck_id'] : (string) $container['pile_id'];
+            $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
+        }
+        $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, x, y, rotation, z_index, face_state, version FROM session_cards WHERE session_id = :session');
         $cards->execute(['session' => $sessionId]);
         $cardProjection = [];
         foreach ($cards as $card) {
             $isOwnHand = $card['location_type'] === 'hand' && (string) $card['hand_participant_id'] === (string) $member['id'];
-            $isPublicFaceUp = $card['location_type'] === 'table' && $card['face_state'] === 'up';
+            $isPublicFaceUp = ($card['location_type'] === 'table' || $card['location_type'] === 'pile') && $card['face_state'] === 'up';
+            if ($card['location_type'] === 'deck' || $card['location_type'] === 'removed') continue;
+            if ($card['location_type'] === 'hand' && !$isOwnHand) continue;
+            if ($card['location_type'] === 'pile' && !$isPublicFaceUp) continue;
             $projected = [
                 'id' => (string) $card['id'], 'location_type' => (string) $card['location_type'],
-                'deck_id' => $card['deck_id'] ? (string) $card['deck_id'] : null, 'pile_id' => $card['pile_id'] ? (string) $card['pile_id'] : null,
-                'hand_participant_id' => $card['hand_participant_id'] ? (string) $card['hand_participant_id'] : null,
+                'deck_id' => null, 'pile_id' => $isOwnHand || $isPublicFaceUp ? ($card['pile_id'] ? (string) $card['pile_id'] : null) : null,
+                'hand_participant_id' => $isOwnHand && $card['hand_participant_id'] ? (string) $card['hand_participant_id'] : null,
                 'x' => $card['x'] !== null ? (float) $card['x'] : null, 'y' => $card['y'] !== null ? (float) $card['y'] : null,
                 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'version' => (int) $card['version'],
             ];
@@ -99,6 +116,7 @@ final class ActionService
             'revision' => (int) $session['revision'],
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
             'participants' => array_map(static fn (array $row): array => ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => (string) $row['user_id'] === (string) $userId, 'hand_count' => $handCounts[(string) $row['id']] ?? 0], $participants->fetchAll()),
+            'containers' => $containerProjection,
             'cards' => $cardProjection,
         ];
     }
@@ -109,7 +127,7 @@ final class ActionService
         $statement = $database->prepare('SELECT revision, action_type, public_payload, created_at FROM session_events WHERE session_id = :session AND revision > :after ORDER BY revision LIMIT 100');
         $statement->execute(['session' => $sessionId, 'after' => $after]);
         $events = [];
-        foreach ($statement as $row) $events[] = ['revision' => (int) $row['revision'], 'action_type' => (string) $row['action_type'], 'payload' => json_decode((string) $row['public_payload'], true, 512, JSON_THROW_ON_ERROR), 'created_at' => (string) $row['created_at']];
+        foreach ($statement as $row) $events[] = ['revision' => (int) $row['revision'], 'action_type' => (string) $row['action_type'], 'created_at' => (string) $row['created_at']];
         return ['from_revision' => $after, 'to_revision' => $snapshot['revision'], 'events' => $events, 'snapshot' => $snapshot];
     }
 
@@ -123,7 +141,11 @@ final class ActionService
             'draw_top' => CardService::draw($database, $session, $member, 'top', $payload),
             'draw_bottom' => CardService::draw($database, $session, $member, 'bottom', $payload),
             'draw_n' => CardService::draw($database, $session, $member, (($payload['direction'] ?? 'top') === 'bottom' ? 'bottom' : 'top'), $payload),
+            'deal' => CardService::deal($database, $session, $member, $payload),
             'shuffle_deck' => CardService::shuffle($database, $session, $member, $payload),
+            'cut_deck' => CardService::cut($database, $session, $member, $payload),
+            'insert_cards' => CardService::insertIntoDeck($database, $session, $member, $payload),
+            'split_deck' => CardService::splitDeck($database, $session, $member, $payload),
             'move_card' => CardService::moveCard($database, $session, $member, $payload),
             'flip_card', 'turn_face_up', 'turn_face_down' => CardService::face($database, $session, $member, $type, $payload),
             'move_to_hand' => CardService::moveToHand($database, $session, $member, $payload),
@@ -132,7 +154,11 @@ final class ActionService
             'create_pile' => PileService::create($database, $session, $member, $payload),
             'move_to_pile' => PileService::move($database, $session, $member, $payload),
             'shuffle_pile' => PileService::shuffle($database, $session, $member, $payload),
+            'reverse_pile' => PileService::reverse($database, $session, $member, $payload, false),
+            'flip_pile' => PileService::reverse($database, $session, $member, $payload, true),
             'merge_pile_top', 'merge_pile_bottom' => PileService::mergeIntoDeck($database, $session, $member, $payload, $type === 'merge_pile_top' ? 'top' : 'bottom'),
+            'collect_all' => self::collectAll($database, $session, $member),
+            'reset_session' => self::resetSession($database, $session, $member, $payload),
             default => throw new RuntimeException('Unsupported action type.'),
         };
     }
@@ -157,6 +183,36 @@ final class ActionService
     {
         $database->prepare('UPDATE session_participants SET removed_at = now() WHERE id = :id')->execute(['id' => $member['id']]);
         return ['participant_id' => (string) $member['id'], 'removed' => true];
+    }
+
+    private static function collectAll(PDO $database, array $session, array $member): array
+    {
+        if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
+        $cards = $database->prepare('SELECT id, source_deck_id FROM session_cards WHERE session_id = :session FOR UPDATE');
+        $cards->execute(['session' => $session['id']]);
+        $rows = $cards->fetchAll();
+        $update = $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = source_deck_id, pile_id = NULL, hand_participant_id = NULL, order_key = :temporary, x = NULL, y = NULL, face_state = 'down', owner_user_id = NULL, locked_by = NULL, version = version + 1 WHERE id = :id");
+        foreach ($rows as $index => $row) $update->execute(['temporary' => -2000000000 + $index, 'id' => $row['id']]);
+        $database->prepare('DELETE FROM session_piles WHERE session_id = :session')->execute(['session' => $session['id']]);
+        $decks = $database->prepare('SELECT id FROM session_decks WHERE session_id = :session ORDER BY id FOR UPDATE');
+        $decks->execute(['session' => $session['id']]);
+        $order = $database->prepare('SELECT c.id FROM session_cards c JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session AND c.deck_id = :deck ORDER BY d.ordinal, c.id');
+        $assign = $database->prepare('UPDATE session_cards SET order_key = :order WHERE id = :id');
+        $count = 0;
+        foreach ($decks as $deck) { $order->execute(['session' => $session['id'], 'deck' => $deck['id']]); foreach ($order->fetchAll() as $index => $row) { $assign->execute(['order' => ($index + 1) * 1000, 'id' => $row['id']]); $count++; } }
+        return ['collected_cards' => $count];
+    }
+
+    private static function resetSession(PDO $database, array $session, array $member, array $payload): array
+    {
+        if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
+        $result = self::collectAll($database, $session, $member);
+        $database->prepare("UPDATE sessions SET status = 'lobby', frozen_at = NULL, ended_at = NULL WHERE id = :id")->execute(['id' => $session['id']]);
+        if (($payload['shuffle'] ?? false) === true) {
+            $decks = $database->prepare('SELECT id FROM session_decks WHERE session_id = :session'); $decks->execute(['session' => $session['id']]);
+            foreach ($decks as $deck) CardService::shuffle($database, $session, $member, ['deck_id' => $deck['id']]);
+        }
+        return ['reset' => true, 'shuffled' => ($payload['shuffle'] ?? false) === true, 'collected_cards' => $result['collected_cards']];
     }
 
     private static function canonicalJson(mixed $value): string

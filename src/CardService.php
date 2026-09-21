@@ -67,6 +67,69 @@ final class CardService
         return ['deck_id' => $deckId, 'card_count' => count($cards), 'randomized' => true];
     }
 
+    public static function deal(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $deckId = (string) ($payload['deck_id'] ?? ''); self::deck($database, $session['id'], $deckId);
+        $participants = $payload['participant_ids'] ?? [];
+        if (!is_array($participants) || count($participants) < 1 || count($participants) > 100) throw new RuntimeException('Participants are invalid.');
+        $unique = array_values(array_unique(array_map('strval', $participants)));
+        $placeholders = implode(',', array_map(static fn (int $index): string => ':participant' . $index, array_keys($unique)));
+        $valid = $database->prepare("SELECT id FROM session_participants WHERE session_id = :session AND id IN ({$placeholders}) AND removed_at IS NULL AND role IN ('host','player')");
+        $validParams = ['session' => $session['id']]; foreach ($unique as $index => $participant) $validParams['participant' . $index] = $participant;
+        $valid->execute($validParams);
+        $allowed = array_map(static fn (array $row): string => (string) $row['id'], $valid->fetchAll());
+        if (count($allowed) !== count($unique)) throw new RuntimeException('A deal recipient is invalid.');
+        $count = (int) ($payload['count'] ?? 1); if ($count < 1 || $count > 10000) throw new RuntimeException('Deal count is invalid.');
+        $mode = ($payload['mode'] ?? 'round_robin') === 'per_participant' ? 'per_participant' : 'round_robin';
+        $needed = $count * ($mode === 'per_participant' ? count($unique) : 1);
+        $order = ($payload['direction'] ?? 'top') === 'bottom' ? 'DESC' : 'ASC';
+        $cards = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key {$order} LIMIT {$needed} FOR UPDATE");
+        $cards->execute(['session' => $session['id'], 'deck' => $deckId]); $rows = $cards->fetchAll();
+        if (count($rows) < $needed) throw new RuntimeException('The deck does not contain enough cards.');
+        $next = $database->prepare("SELECT coalesce(max(order_key),0) FROM session_cards WHERE session_id = :session AND location_type = 'hand' AND hand_participant_id = :participant");
+        $update = $database->prepare("UPDATE session_cards SET location_type='hand', deck_id=NULL, pile_id=NULL, hand_participant_id=:participant, order_key=:order_key, x=NULL, y=NULL, face_state='private', version=version+1 WHERE id=:id");
+        $counts = array_fill_keys($unique, 0); $index = 0;
+        for ($round = 0; $round < $count; $round++) foreach ($unique as $participant) {
+            if ($mode === 'per_participant') { /* ordering is intentionally participant-major below */ }
+            if ($index >= count($rows)) break 2;
+            $next->execute(['session' => $session['id'], 'participant' => $participant]);
+            $update->execute(['participant' => $participant, 'order_key' => (int) $next->fetchColumn() + 1000, 'id' => $rows[$index]['id']]);
+            $counts[$participant]++; $index++;
+        }
+        self::bumpDeck($database, $deckId);
+        foreach ($counts as $participant => $number) if ($number > 0) self::bumpHand($database, $session['id'], $participant);
+        return ['deck_id' => $deckId, 'participant_counts' => $counts, 'card_count' => $needed];
+    }
+
+    public static function cut(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member); $deckId = (string) ($payload['deck_id'] ?? ''); self::deck($database, $session['id'], $deckId);
+        $statement = $database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='deck' AND deck_id=:deck ORDER BY order_key FOR UPDATE"); $statement->execute(['session'=>$session['id'],'deck'=>$deckId]); $rows=$statement->fetchAll(); $total=count($rows);
+        if ($total < 2) return ['deck_id'=>$deckId,'cut_at'=>0,'card_count'=>$total];
+        $cut = isset($payload['count']) ? (int)$payload['count'] : random_int(1, $total - 1); if ($cut < 1 || $cut >= $total) throw new RuntimeException('Cut position is invalid.');
+        $rows = array_merge(array_slice($rows, $cut), array_slice($rows, 0, $cut)); self::assignOrder($database, $rows); self::bumpDeck($database, $deckId);
+        return ['deck_id'=>$deckId,'cut_at'=>$cut,'card_count'=>$total];
+    }
+
+    public static function insertIntoDeck(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member); $deckId=(string)($payload['deck_id']??''); self::deck($database,$session['id'],$deckId); $ids=$payload['card_ids']??[];
+        if (!is_array($ids)||count($ids)<1||count($ids)>100) throw new RuntimeException('Card selection is invalid.');
+        $moving=[]; foreach($ids as $id){$card=self::card($database,$session['id'],(string)$id); self::assertCanControl($card,$member); if($card['location_type']==='deck') throw new RuntimeException('A deck card cannot be inserted by identity.'); $moving[]=$card;}
+        $all=$database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='deck' AND deck_id=:deck ORDER BY order_key");$all->execute(['session'=>$session['id'],'deck'=>$deckId]);$remaining=$all->fetchAll();
+        $position=$payload['position']??'random'; if($position==='random'){$at=random_int(0,count($remaining));}else{$at=(int)$position;if($at<0||$at>count($remaining))throw new RuntimeException('Insertion position is invalid.');}
+        $ordered=array_merge(array_slice($remaining,0,$at),$moving,array_slice($remaining,$at)); $update=$database->prepare("UPDATE session_cards SET location_type='deck',deck_id=:deck,pile_id=NULL,hand_participant_id=NULL,order_key=:temp,x=NULL,y=NULL,face_state='down',version=version+1 WHERE id=:id"); foreach($ordered as $i=>$row)$update->execute(['deck'=>$deckId,'temp'=>-1000000+$i,'id'=>$row['id']]); self::assignOrder($database,$ordered); self::bumpDeck($database,$deckId);
+        return ['deck_id'=>$deckId,'position'=>$at,'card_count'=>count($moving)];
+    }
+
+    public static function splitDeck(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session,$member);$deckId=(string)($payload['deck_id']??'');self::deck($database,$session['id'],$deckId);$count=(int)($payload['count']??0);if($count<1)throw new RuntimeException('Split count is invalid.');
+        $rows=$database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='deck' AND deck_id=:deck ORDER BY order_key FOR UPDATE");$rows->execute(['session'=>$session['id'],'deck'=>$deckId]);$cards=$rows->fetchAll();if($count>=count($cards))throw new RuntimeException('Split must leave cards in the source deck.');
+        $insert=$database->prepare('INSERT INTO session_piles(session_id,label,x,y,rotation,z_index) VALUES(:session,:label,:x,:y,:rotation,:z) RETURNING id');$insert->execute(['session'=>$session['id'],'label'=>isset($payload['label'])?(string)$payload['label']:null,'x'=>(float)($payload['x']??0),'y'=>(float)($payload['y']??0),'rotation'=>(float)($payload['rotation']??0),'z'=>(int)($payload['z_index']??0)]);$pileId=(string)$insert->fetchColumn();$moving=array_slice($cards,0,$count);$update=$database->prepare("UPDATE session_cards SET location_type='pile',deck_id=NULL,pile_id=:pile,order_key=:order,face_state='down',version=version+1 WHERE id=:id");foreach($moving as $i=>$row)$update->execute(['pile'=>$pileId,'order'=>($i+1)*1000,'id'=>$row['id']]);self::assignOrder($database,array_slice($cards,$count));self::bumpDeck($database,$deckId);return ['deck_id'=>$deckId,'pile_id'=>$pileId,'card_count'=>$count];
+    }
+
     public static function moveCard(PDO $database, array $session, array $member, array $payload): array
     {
         self::assertPlayer($session, $member);

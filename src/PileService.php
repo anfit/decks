@@ -59,6 +59,22 @@ final class PileService
         return ['pile_id' => (string) $pile['id'], 'card_count' => count($rows), 'randomized' => true];
     }
 
+    public static function reverse(PDO $database, array $session, array $member, array $payload, bool $flipFaces): array
+    {
+        self::assertPlayer($session, $member);
+        $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
+        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
+        $cards = $database->prepare("SELECT id, face_state FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
+        $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $rows = array_reverse($cards->fetchAll());
+        $update = $database->prepare('UPDATE session_cards SET order_key = :order, face_state = :face, version = version + 1 WHERE id = :id');
+        foreach ($rows as $index => $row) {
+            $face = $flipFaces ? (($row['face_state'] ?? 'down') === 'up' ? 'down' : 'up') : (string) $row['face_state'];
+            $update->execute(['order' => ($index + 1) * 1000, 'face' => $face, 'id' => $row['id']]);
+        }
+        $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pile['id']]);
+        return ['pile_id' => (string) $pile['id'], 'card_count' => count($rows), 'reversed' => true, 'faces_flipped' => $flipFaces];
+    }
+
     public static function mergeIntoDeck(PDO $database, array $session, array $member, array $payload, string $position): array
     {
         self::assertPlayer($session, $member);

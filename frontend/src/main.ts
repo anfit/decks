@@ -3,7 +3,7 @@ import "./styles.css";
 type User = { id: string; email: string; role: string };
 type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
-type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; cards: Card[] };
+type State = { revision: number; session: Session; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -73,16 +73,24 @@ function renderTable(state: State): void {
   if (!workspace) return;
   currentState = state; workspace.replaceChildren();
   const heading = document.createElement("h2"); heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
-  const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${state.cards.length} cards`; workspace.append(meta);
+  const tableCardCount = state.cards.filter((card) => card.location_type === "table").length;
+  const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
+  const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;
+  const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${totalCardCount} cards`; workspace.append(meta);
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
-  const deck = state.cards.find((card) => card.deck_id !== null);
-  if (deck?.deck_id) {
-    controls.append(button("Draw top", () => void action(state.session.id, "draw_top", { deck_id: deck.deck_id })));
-    controls.append(button("Shuffle", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.deck_id }), true));
+  const deck = state.containers.decks[0];
+  if (deck?.id) {
+    controls.append(button("Draw top", () => void action(state.session.id, "draw_top", { deck_id: deck.id })));
+    controls.append(button("Shuffle", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.id }), true));
+    controls.append(button("Cut", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true));
+    const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
+    if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
+    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", {}), true));
+    controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
   }
   workspace.append(controls);
   renderBoard(state);
