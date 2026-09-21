@@ -130,6 +130,35 @@ final class CardService
         $insert=$database->prepare('INSERT INTO session_piles(session_id,label,x,y,rotation,z_index) VALUES(:session,:label,:x,:y,:rotation,:z) RETURNING id');$insert->execute(['session'=>$session['id'],'label'=>isset($payload['label'])?(string)$payload['label']:null,'x'=>(float)($payload['x']??0),'y'=>(float)($payload['y']??0),'rotation'=>(float)($payload['rotation']??0),'z'=>(int)($payload['z_index']??0)]);$pileId=(string)$insert->fetchColumn();$moving=array_slice($cards,0,$count);$update=$database->prepare("UPDATE session_cards SET location_type='pile',deck_id=NULL,pile_id=:pile,order_key=:order,face_state='down',version=version+1 WHERE id=:id");foreach($moving as $i=>$row)$update->execute(['pile'=>$pileId,'order'=>($i+1)*1000,'id'=>$row['id']]);self::assignOrder($database,array_slice($cards,$count));self::bumpDeck($database,$deckId);return ['deck_id'=>$deckId,'pile_id'=>$pileId,'card_count'=>$count];
     }
 
+    public static function remove(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member); $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? '')); self::assertVersion($card, $payload); self::assertCanControl($card, $member);
+        if ($card['location_type'] === 'removed') throw new RuntimeException('Card is already removed.');
+        $database->prepare("UPDATE session_cards SET location_type='removed', deck_id=NULL, pile_id=NULL, hand_participant_id=NULL, order_key=NULL, x=NULL, y=NULL, face_state='down', locked_by=NULL, version=version+1 WHERE id=:id")->execute(['id'=>$card['id']]);
+        if ($card['location_type'] === 'hand') { self::normalizeHand($database, $session['id'], (string) $card['hand_participant_id']); self::bumpHand($database, $session['id'], (string) $card['hand_participant_id']); }
+        if ($card['location_type'] === 'pile') self::bumpPile($database, (string) $card['pile_id']);
+        if ($card['location_type'] === 'deck') self::bumpDeck($database, (string) $card['deck_id']);
+        return ['card_id'=>(string)$card['id'],'removed'=>true];
+    }
+
+    public static function restore(PDO $database, array $session, array $member, array $payload): array
+    {
+        if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? '')); self::assertVersion($card, $payload); if ($card['location_type'] !== 'removed') throw new RuntimeException('Card is not removed.');
+        $deckId = (string) $card['source_deck_id']; $order = self::nextOrder($database, $session['id'], 'deck', $deckId);
+        $database->prepare("UPDATE session_cards SET location_type='deck', deck_id=:deck, order_key=:order, face_state='down', version=version+1 WHERE id=:id")->execute(['deck'=>$deckId,'order'=>$order+1000,'id'=>$card['id']]); self::bumpDeck($database,$deckId);
+        return ['card_id'=>(string)$card['id'],'deck_id'=>$deckId,'restored'=>true];
+    }
+
+    public static function lock(PDO $database, array $session, array $member, array $payload, bool $locked): array
+    {
+        self::assertPlayer($session, $member); $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? '')); self::assertVersion($card, $payload);
+        if ($locked && $card['locked_by'] !== null && (string)$card['locked_by'] !== (string)$member['user_id']) throw new RuntimeException('That card is locked.');
+        if (!$locked && $card['locked_by'] !== null && (string)$card['locked_by'] !== (string)$member['user_id']) throw new RuntimeException('Only the card owner can unlock it.');
+        $database->prepare('UPDATE session_cards SET locked_by=:owner, version=version+1 WHERE id=:id')->execute(['owner'=>$locked?$member['user_id']:null,'id'=>$card['id']]);
+        return ['card_id'=>(string)$card['id'],'locked'=>$locked];
+    }
+
     public static function moveCard(PDO $database, array $session, array $member, array $payload): array
     {
         self::assertPlayer($session, $member);
