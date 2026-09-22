@@ -86,6 +86,12 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Spectator", frontend)
         self.assertIn("Your tables", frontend)
 
+    def test_deal_modes_have_distinct_round_robin_and_participant_major_order(self) -> None:
+        source = read_text("src/CardService.php")
+        self.assertIn("if ($mode === 'per_participant')", source)
+        self.assertIn("foreach ($unique as $participant) for ($round = 0; $round < $count; $round++) $deliver($participant);", source)
+        self.assertIn("for ($round = 0; $round < $count; $round++) foreach ($unique as $participant) $deliver($participant);", source)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)

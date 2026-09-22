@@ -91,12 +91,16 @@ final class CardService
         $next = $database->prepare("SELECT coalesce(max(order_key),0) FROM session_cards WHERE session_id = :session AND location_type = 'hand' AND hand_participant_id = :participant");
         $update = $database->prepare("UPDATE session_cards SET location_type='hand', deck_id=NULL, pile_id=NULL, hand_participant_id=:participant, order_key=:order_key, x=NULL, y=NULL, face_state='private', version=version+1 WHERE id=:id");
         $counts = array_fill_keys($unique, 0); $index = 0;
-        for ($round = 0; $round < $count; $round++) foreach ($unique as $participant) {
-            if ($mode === 'per_participant') { /* ordering is intentionally participant-major below */ }
-            if ($index >= count($rows)) break 2;
+        $deliver = static function (string $participant) use ($next, $update, $session, $rows, &$index, &$counts): void {
+            if ($index >= count($rows)) throw new RuntimeException('The deck does not contain enough cards.');
             $next->execute(['session' => $session['id'], 'participant' => $participant]);
             $update->execute(['participant' => $participant, 'order_key' => (int) $next->fetchColumn() + 1000, 'id' => $rows[$index]['id']]);
             $counts[$participant]++; $index++;
+        };
+        if ($mode === 'per_participant') {
+            foreach ($unique as $participant) for ($round = 0; $round < $count; $round++) $deliver($participant);
+        } else {
+            for ($round = 0; $round < $count; $round++) foreach ($unique as $participant) $deliver($participant);
         }
         self::bumpDeck($database, $deckId);
         foreach ($counts as $participant => $number) if ($number > 0) self::bumpHand($database, $session['id'], $participant);
