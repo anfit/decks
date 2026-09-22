@@ -17,7 +17,7 @@ Composite operations must require a grant for each source and destination domain
 | Actions | Required capabilities |
 | --- | --- |
 | `draw_top`, `draw_bottom`, `draw_n` to a pile | `deck.manage`, `pile.manage` |
-| `return_top`, `return_bottom`, `insert_cards` | `deck.manage`, `card.manage` |
+| `return_top`, `return_bottom`, `return_to_source_decks`, `insert_cards` | `deck.manage`, `card.manage` |
 | `split_deck` | `deck.manage`, `pile.manage` |
 | `move_to_pile`, `collect_spread` | `card.manage`, `pile.manage` |
 | `draw_pile_top`, `draw_pile_bottom` | `pile.manage`, `card.manage` |
