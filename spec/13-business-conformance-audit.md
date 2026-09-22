@@ -29,7 +29,7 @@ The product surface is materially behind the business MVP even where backend pri
 | Priority | Area | Evidence and required follow-up |
 | --- | --- | --- |
 | P0 | Primary web flow | The normal UI only creates or joins a blank table and exposes Refresh, Draw top, Shuffle, Cut, Deal one each, Collect all, and Reset. It cannot choose a template, deck, preset, access mode, participant permissions, or spectator role. Wire the intended setup and core actions into the UI. |
-| P0 | Join-token flow | A token produced by the create-table UI is a scoped random token (`hex.hex`), while the frontend currently appends `==` and calls `atob` on the first segment as if it were a base64 JSON payload. Joining the token from the same UI therefore fails before the request (`InvalidCharacterError`). Make token parsing match the API contract and add a browser regression test. |
+| Resolved | Join-token flow | The original audit found that the frontend decoded the scoped random `hex.hex` token as padded base64 JSON. Commit `8d59e4f` adds the token-only join endpoint, submits the token unchanged, and adds a contract regression test. Production release `e43714282ca850be` now passes a live create → paste → join browser check. |
 | P1 | Capability permissions | `session_participants.capabilities` is stored, but service checks and UI controls do not consistently enforce or configure capability-level permissions. Add an explicit policy matrix and host controls. |
 | P1 | Deal semantics | `per_participant` computes a mode but currently iterates round-robin, so participant-at-a-time behavior is not implemented. Correct the service and add a contract test. |
 | P1 | Pile operations | Missing explicit pile draw top/bottom, pile split/merge, collect-spread, pile spatial move/rotate/z-order, labels, and locks. Add actions, authorization, projections, and tests. |
@@ -42,6 +42,8 @@ The product surface is materially behind the business MVP even where backend pri
 ## Conformance result
 
 The backend invariants and privacy boundary are largely conformant, but the business MVP is only partially delivered at the UI/product surface. The remaining plan must prioritize a complete session setup and card-table flow, then fill the missing pile/card semantics and permissions before treating the application as business-complete.
+
+Remediation verification: the P0 join-token defect is closed in production. The browser now creates a table, accepts the displayed opaque token in the Join table field, opens the resulting table, and reports `Connected`.
 
 ## Required plan adjustments
 
