@@ -18,7 +18,7 @@ class DecksContractTest(unittest.TestCase):
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")
-        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
+        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
             self.assertIn(action, source)
 
     def test_mats_presets_and_private_zone_effects_are_authorized(self) -> None:
@@ -91,6 +91,14 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("if ($mode === 'per_participant')", source)
         self.assertIn("foreach ($unique as $participant) for ($round = 0; $round < $count; $round++) $deliver($participant);", source)
         self.assertIn("for ($round = 0; $round < $count; $round++) foreach ($unique as $participant) $deliver($participant);", source)
+
+    def test_pile_projection_and_operations_preserve_safe_metadata(self) -> None:
+        action = read_text("src/ActionService.php")
+        self.assertIn("'label' => $pile['label']", action)
+        self.assertIn("'locked' => $pile['locked_by'] !== null", action)
+        pile = read_text("src/PileService.php")
+        for method in ("public static function draw", "public static function split", "public static function merge", "public static function collectSpread", "public static function updateGeometry", "public static function label", "public static function lock"):
+            self.assertIn(method, pile)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

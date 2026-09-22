@@ -93,6 +93,14 @@ final class ActionService
             $id = $type === 'deck' ? (string) $container['deck_id'] : (string) $container['pile_id'];
             $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
         }
+        $pileMeta = $database->prepare('SELECT id, label, x, y, rotation, z_index, locked_by, version FROM session_piles WHERE session_id = :session ORDER BY z_index, id');
+        $pileMeta->execute(['session' => $sessionId]);
+        $pileById = [];
+        foreach ($pileMeta as $pile) {
+            $pileById[(string) $pile['id']] = ['id' => (string) $pile['id'], 'card_count' => 0, 'label' => $pile['label'] !== null ? (string) $pile['label'] : null, 'x' => (float) $pile['x'], 'y' => (float) $pile['y'], 'rotation' => (float) $pile['rotation'], 'z_index' => (int) $pile['z_index'], 'locked' => $pile['locked_by'] !== null, 'version' => (int) $pile['version']];
+        }
+        foreach ($containerProjection['piles'] as $pile) if (isset($pileById[$pile['id']])) $pileById[$pile['id']]['card_count'] = $pile['card_count'];
+        $containerProjection['piles'] = array_values($pileById);
         $zones = $database->prepare('SELECT id, name, geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
         $zones->execute(['session' => $sessionId]);
         $zoneProjection = [];
@@ -172,6 +180,13 @@ final class ActionService
             'return_top', 'return_bottom' => CardService::returnToDeck($database, $session, $member, $payload, $type === 'return_top' ? 'top' : 'bottom'),
             'create_pile' => PileService::create($database, $session, $member, $payload),
             'move_to_pile' => PileService::move($database, $session, $member, $payload),
+            'draw_pile_top', 'draw_pile_bottom' => PileService::draw($database, $session, $member, $payload, $type === 'draw_pile_top' ? 'top' : 'bottom'),
+            'split_pile' => PileService::split($database, $session, $member, $payload),
+            'merge_piles' => PileService::merge($database, $session, $member, $payload),
+            'collect_spread' => PileService::collectSpread($database, $session, $member, $payload),
+            'move_pile', 'rotate_pile' => PileService::updateGeometry($database, $session, $member, $payload),
+            'label_pile' => PileService::label($database, $session, $member, $payload),
+            'lock_pile', 'unlock_pile' => PileService::lock($database, $session, $member, $payload, $type === 'lock_pile'),
             'shuffle_pile' => PileService::shuffle($database, $session, $member, $payload),
             'reverse_pile' => PileService::reverse($database, $session, $member, $payload, false),
             'flip_pile' => PileService::reverse($database, $session, $member, $payload, true),

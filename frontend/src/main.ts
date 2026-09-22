@@ -5,8 +5,9 @@ type Session = { id: string; title: string | null; status: string; revision: num
 type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
+type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -154,6 +155,20 @@ function renderTable(state: State): void {
     if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
     controls.append(button("Collect all", () => void action(state.session.id, "collect_all", {}), true));
     controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
+  }
+  controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
+  for (const pile of state.containers.piles) {
+    const pileControls = document.createElement("div"); pileControls.className = "pile-controls";
+    const pileLabel = document.createElement("span"); pileLabel.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; pileControls.append(pileLabel);
+    if (!pile.locked) {
+      pileControls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+      pileControls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+      pileControls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+      pileControls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    } else {
+      pileControls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    }
+    controls.append(pileControls);
   }
   workspace.append(controls);
   renderBoard(state);
