@@ -11,3 +11,18 @@ The active host cannot remove their own `participant.manage` control through thi
 An authorized host snapshot may include sanitized capability decisions for the active participants so the table surface can render host controls. Other participants receive only their own explicit decisions. The browser hides mutation affordances when the current effective capability is absent, while the service remains the final authorization boundary.
 
 Acceptance requires unauthorized actions to fail atomically, explicit grants/denials to survive reconnect and snapshots, and no capability map or participant identity to leak through public activity events.
+
+Composite operations must require a grant for each source and destination domain they change. The required pairs are:
+
+| Actions | Required capabilities |
+| --- | --- |
+| `draw_top`, `draw_bottom`, `draw_n` to a pile | `deck.manage`, `pile.manage` |
+| `return_top`, `return_bottom`, `insert_cards` | `deck.manage`, `card.manage` |
+| `split_deck` | `deck.manage`, `pile.manage` |
+| `move_to_pile`, `collect_spread` | `card.manage`, `pile.manage` |
+| `draw_pile_top`, `draw_pile_bottom` | `pile.manage`, `card.manage` |
+| `merge_pile_top`, `merge_pile_bottom` | `pile.manage`, `deck.manage` |
+| `lock_card`, `unlock_card` | `lock.manage`, `card.manage` |
+| `lock_pile`, `unlock_pile` | `lock.manage`, `pile.manage` |
+
+Single-domain operations such as moving or labeling a pile continue to use their resource-domain capability. A composite denial is checked before duplicate replay and before the action mutation path; no card, container, event, or session revision changes on denial. New operations must extend this matrix before implementation.
