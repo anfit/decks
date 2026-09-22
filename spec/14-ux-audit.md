@@ -80,3 +80,7 @@ The authenticated pass verified login and one reversible keyboard card action on
 ## Realtime finding response — 2026-09-22
 
 The repeated reconnect state led to a source fix in commit `a0abcb8` (S08; `spec/05-sync.md`): ordinary rerenders no longer replace the socket; session changes invalidate old callbacks and retry timers; the UI marks Connected only after the active WebSocket opens. The regression contract is included in the 24/24 passing Python suite; TypeScript typecheck, Vite build and diff check pass. The production browser still runs the old release, so the result is not yet accepted in production. Re-run the mutation/reconnect and two-client checks after deployment.
+
+## Multi-deck setup response — 2026-09-22
+
+Commit `93e8d06` (S17; `spec/15-session-setup-and-capabilities.md`) replaces the single deck selector with repeatable, accessible template-version rows. Duplicate versions are permitted to represent multiple copies, and additional deck instances can accompany a preset's pinned deck. Creation submits setup actions in revision order, disables the create button while pending and preserves access to a partially configured session if an action fails. The current production release predates this change, so confirm its layout and multi-deck behavior after deployment.
