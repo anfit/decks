@@ -12,6 +12,8 @@ The authenticated join surface accepts the opaque `selector.secret` table token 
 
 Deal accepts `mode: round_robin` (one card per recipient per round) or `mode: per_participant` (the requested count is completed for the first recipient before moving to the next). Both modes select and assign the full card set atomically and return per-participant counts.
 
+Host `restore_card` accepts an explicit source-deck position (`top`, `bottom` or `shuffle`), and `collect_all` accepts `original`, `shuffle` or `preserve` mode. The server remains authoritative for ordering and randomization.
+
 The host may transfer host role, remove/restore participants, freeze/unfreeze configuration and end/reset where capability permits. A global account administrator has no table access unless also a participant. Host disconnect does not elect a replacement automatically.
 
 ## Durable action envelope
