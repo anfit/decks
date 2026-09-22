@@ -139,7 +139,7 @@ final class ActionService
             'participants' => array_map(static function (array $row) use ($userId, $handCounts): array {
                 $isCurrent = (string) $row['user_id'] === (string) $userId;
                 $projection = ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => $isCurrent, 'hand_count' => $handCounts[(string) $row['id']] ?? 0];
-                if ($isCurrent) $projection['capabilities'] = SessionService::capabilities($row);
+                if ($isCurrent || ($member['role'] ?? '') === 'host') $projection['capabilities'] = SessionService::capabilities($row);
                 return $projection;
             }, $participants->fetchAll()),
             'containers' => $containerProjection,

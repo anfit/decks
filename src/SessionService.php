@@ -163,6 +163,7 @@ final class SessionService
         if (($member['role'] ?? null) !== 'host') throw new RuntimeException('Host permission required.');
         $participantId = (string) ($payload['participant_id'] ?? '');
         if (!preg_match('/^[0-9a-fA-F-]{36}$/', $participantId)) throw new RuntimeException('Participant reference is invalid.');
+        if ($participantId === (string) ($member['id'] ?? '')) throw new RuntimeException('The host cannot change their own capabilities.');
         $requested = $payload['capabilities'] ?? null;
         if (!is_array($requested)) throw new RuntimeException('Capability map is invalid.');
         $normalized = [];

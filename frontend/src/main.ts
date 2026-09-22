@@ -7,7 +7,15 @@ type TemplateVersion = { id: string; version: number; definition_count: number }
 type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
+type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+const CAPABILITIES: Array<{ key: Capability; label: string }> = [
+  { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
+  { key: "zone.manage", label: "Zone administration" }, { key: "deck.manage", label: "Deck actions" },
+  { key: "card.manage", label: "Card actions" }, { key: "pile.manage", label: "Pile actions" },
+  { key: "lock.manage", label: "Lock actions" }, { key: "card.undo", label: "Undo" },
+];
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -131,6 +139,42 @@ function showJoinResult(session: { id: string; join_token: string }): void {
   setStatus("Table is ready", "ok");
 }
 
+function effectiveCapability(participant: Participant, capability: Capability): boolean {
+  if (typeof participant.capabilities?.[capability] === "boolean") return participant.capabilities[capability] as boolean;
+  if (participant.role === "host") return true;
+  if (participant.role === "spectator") return false;
+  return ["deck.manage", "card.manage", "pile.manage", "lock.manage", "card.undo"].includes(capability);
+}
+
+function currentCan(capability: Capability): boolean {
+  const participant = currentState?.participants.find((item) => item.is_current);
+  return participant ? effectiveCapability(participant, capability) : false;
+}
+
+function renderCapabilityControls(state: State): HTMLElement | null {
+  const current = state.participants.find((participant) => participant.is_current);
+  if (!current || current.role !== "host" || !currentCan("participant.manage")) return null;
+  const panel = document.createElement("section"); panel.className = "panel capability-panel";
+  const heading = document.createElement("h3"); heading.textContent = "Participant capabilities"; panel.append(heading);
+  const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Explicit choices override the role defaults."; panel.append(hint);
+  for (const participant of state.participants) {
+    if (participant.is_current) continue;
+    const row = document.createElement("fieldset"); row.className = "capability-row";
+    const legend = document.createElement("legend"); legend.textContent = `${participant.is_current ? "You" : "Participant"} · ${participant.role}`; row.append(legend);
+    for (const capability of CAPABILITIES) {
+      const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = effectiveCapability(participant, capability.key);
+      checkbox.addEventListener("change", () => {
+        checkbox.disabled = true;
+        const values = Object.fromEntries(CAPABILITIES.map((item) => [item.key, item.key === capability.key ? checkbox.checked : effectiveCapability(participant, item.key)]));
+        void action(state.session.id, "set_participant_capabilities", { participant_id: participant.id, capabilities: values });
+      });
+      row.append(labelled(capability.label, checkbox));
+    }
+    panel.append(row);
+  }
+  return panel;
+}
+
 function renderTable(state: State): void {
   if (!workspace) return;
   currentState = state; workspace.replaceChildren();
@@ -144,32 +188,34 @@ function renderTable(state: State): void {
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
+  const capabilityPanel = renderCapabilityControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
   const deck = state.containers.decks[0];
-  if (deck?.id) {
+  if (deck?.id && currentCan("deck.manage")) {
     controls.append(button("Draw top", () => void action(state.session.id, "draw_top", { deck_id: deck.id })));
     controls.append(button("Shuffle", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.id }), true));
     controls.append(button("Cut", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true));
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
     if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
-    const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
-    controls.append(labelled("Collect mode", collectMode));
-    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
-    controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
+    if (currentCan("session.manage")) {
+      const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
+      controls.append(labelled("Collect mode", collectMode));
+      controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
+      controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
+    }
   }
-  controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
+  if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
   for (const pile of state.containers.piles) {
     const pileControls = document.createElement("div"); pileControls.className = "pile-controls";
     const pileLabel = document.createElement("span"); pileLabel.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; pileControls.append(pileLabel);
-    if (!pile.locked) {
+    if (!pile.locked && currentCan("pile.manage")) {
       pileControls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
       pileControls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
       pileControls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-      pileControls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-    } else {
-      pileControls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
     }
+    if (!pile.locked && currentCan("lock.manage")) pileControls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    if (pile.locked && currentCan("lock.manage")) pileControls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
     controls.append(pileControls);
   }
   workspace.append(controls);
@@ -190,7 +236,8 @@ function renderBoard(state: State): void {
   if (cards.length === 0) {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; surface.append(empty);
   }
-  cards.forEach((card, index) => surface.append(renderCard(card, index)));
+  const canManageCards = currentCan("card.manage");
+  cards.forEach((card, index) => surface.append(renderCard(card, index, false, canManageCards)));
   board.append(surface);
 
   const currentParticipant = state.participants.find((participant) => participant.is_current);
@@ -202,25 +249,28 @@ function renderBoard(state: State): void {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Your hand is empty."; handRow.append(empty);
   }
   handCards.forEach((card, index) => {
-    const item = renderCard(card, index, true);
-    const playDown = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
-    const playUp = button("Play face up", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "up", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
-    item.append(playDown, playUp);
+    const item = renderCard(card, index, true, canManageCards);
+    if (canManageCards) {
+      const playDown = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
+      const playUp = button("Play face up", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "up", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
+      item.append(playDown, playUp);
+    }
     handRow.append(item);
   });
   hand.append(handRow); board.append(hand);
   workspace.append(board);
 }
 
-function renderCard(card: Card, index: number, inHand = false): HTMLElement {
+function renderCard(card: Card, index: number, inHand = false, interactive = true): HTMLElement {
   const item = document.createElement("article");
   item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
-  item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
+  if (interactive) { item.tabIndex = 0; item.setAttribute("role", "button"); }
+  item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);
   const x = card.x ?? 24 + (index % 8) * 74;
   const y = card.y ?? 24 + Math.floor(index / 8) * 28;
-  if (!inHand) {
+  if (!inHand && interactive) {
     item.style.left = `${x}px`; item.style.top = `${y}px`; item.style.transform = `rotate(${card.rotation || 0}deg)`;
     item.title = "Drag to move. Double click to turn the card.";
     let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;

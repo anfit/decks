@@ -35,6 +35,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 label { display: grid; gap: .35rem; font-size: .9rem; }
 .result textarea { font-family: ui-monospace, monospace; font-size: .8rem; }
 .players { padding-left: 1.25rem; line-height: 1.7; }
+.capability-panel h3 { margin: 0; }
+.capability-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: 0; padding: .75rem; border: 1px solid #cbd5dc; border-radius: .45rem; }
+.capability-row legend { grid-column: 1 / -1; padding: 0 .25rem; font-weight: 700; }
+.capability-row label { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: .45rem; }
+.capability-row input { width: auto; }
 .table-view { display: grid; gap: .75rem; margin-top: 1.5rem; }
 .table-view h3 { margin: .25rem 0; }
 .table-surface { position: relative; min-height: 20rem; overflow: auto; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }

@@ -134,6 +134,19 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("'capabilities'", action)
         self.assertIn("capabilities'], true", action)
         self.assertIn("unauthorized actions to fail atomically", spec)
+        self.assertIn("cannot change their own capabilities", session)
+
+    def test_capability_controls_are_host_scoped_and_mutation_affordances_are_capability_aware(self) -> None:
+        action = read_text("src/ActionService.php")
+        frontend = read_text("frontend/src/main.ts")
+        styles = read_text("frontend/src/styles.css")
+        self.assertIn("$isCurrent || ($member['role'] ?? '') === 'host'", action)
+        self.assertIn("Participant capabilities", frontend)
+        self.assertIn("set_participant_capabilities", frontend)
+        self.assertIn("currentCan(\"deck.manage\")", frontend)
+        self.assertIn("currentCan(\"pile.manage\")", frontend)
+        self.assertIn("currentCan(\"card.manage\")", frontend)
+        self.assertIn("capability-row", styles)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
