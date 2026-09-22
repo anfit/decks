@@ -21,7 +21,7 @@ Composite operations must require a grant for each source and destination domain
 | `split_deck` | `deck.manage`, `pile.manage` |
 | `move_to_pile`, `collect_spread` | `card.manage`, `pile.manage` |
 | `draw_pile_top`, `draw_pile_bottom` | `pile.manage`, `card.manage` |
-| `merge_pile_top`, `merge_pile_bottom` | `pile.manage`, `deck.manage` |
+| `merge_pile_top`, `merge_pile_bottom`, `merge_pile_shuffle` | `pile.manage`, `deck.manage` |
 | `lock_card`, `unlock_card` | `lock.manage`, `card.manage` |
 | `lock_pile`, `unlock_pile` | `lock.manage`, `pile.manage` |
 
