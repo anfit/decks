@@ -16,6 +16,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("'zones' => $zoneProjection", source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
         self.assertIn("c.face_state, c.owner_user_id, c.version", source)
+        self.assertIn("if ($isOwnHand) $projected['hand_order'] = (int) $card['order_key']", source)
         self.assertIn("SELECT id, geometry, priority, behavior FROM session_zones", read_text("src/CardService.php"))
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
@@ -55,6 +56,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("sanitizeEvent($type, $result)", source)
         self.assertIn("'card_definition_id', 'cards'", source)
         self.assertIn("'owner_user_id', 'undo'", source)
+        self.assertIn("'recipient_participant_id', 'hand_participant_id'", source)
         card_source = read_text("src/CardService.php")
         self.assertIn("applyZoneEffect", card_source)
         self.assertIn("Overlapping zones have conflicting effects", card_source)
@@ -189,7 +191,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("capabilityForAction", action)
         self.assertIn("SessionService::hasCapability", action)
         self.assertIn("'capabilities'", action)
-        self.assertIn("capabilities'], true", action)
+        self.assertIn("'capabilities', 'participant_id'", action)
         self.assertIn("unauthorized actions to fail atomically", spec)
         self.assertIn("cannot change their own capabilities", session)
 
@@ -265,6 +267,27 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Expected card versions are required.", card)
         self.assertIn("return ['card_count' => count($ids), 'position' => $position]", card)
         self.assertIn("exact expected card-version map", spec)
+
+    def test_hand_order_transfer_and_return_controls_keep_private_state_owner_scoped(self) -> None:
+        action = read_text("src/ActionService.php")
+        card = read_text("src/CardService.php")
+        frontend = read_text("frontend/src/main.ts")
+        styles = read_text("frontend/src/styles.css")
+        ui_spec = read_text("spec/07-table-interaction.md")
+        action_spec = read_text("spec/04-actions.md")
+        self.assertIn("c.order_key", action)
+        self.assertIn("if ($isOwnHand) $projected['hand_order']", action)
+        self.assertIn("private static function giveCardsCore", card)
+        self.assertIn("Only your own hand cards can be given.", card)
+        self.assertIn("Choose another participant.", card)
+        self.assertIn("expected_card_versions", frontend)
+        self.assertIn('"reorder_hand"', frontend)
+        self.assertIn('"give_cards"', frontend)
+        for label in ("Move hand card", "Give selected cards", "Return selected hand cards to source decks"):
+            self.assertIn(label, frontend)
+        self.assertIn("server-provided private hand order", ui_spec)
+        self.assertIn("exact expected-version entry for every selected card", action_spec)
+        self.assertIn("hand-card-tools", styles)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

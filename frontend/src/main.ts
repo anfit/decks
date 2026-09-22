@@ -7,7 +7,7 @@ type TemplateVersion = { id: string; version: number; definition_count: number }
 type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Deck = { id: string; label: string | null; card_count: number };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
-type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
+type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
@@ -51,6 +51,9 @@ let selectionMode = false;
 const selectedCardIds = new Set<string>();
 let selectionCountLabel: HTMLElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
+const selectedHandCardIds = new Set<string>();
+let handSelectionCountLabel: HTMLElement | null = null;
+let handSelectionButtons: HTMLButtonElement[] = [];
 
 function setStatus(message: string, state: "ok" | "error" | "pending" = "pending"): void {
   if (!status) return;
@@ -300,6 +303,17 @@ function updateSelectionUi(): void {
   });
 }
 
+function updateHandSelectionUi(): void {
+  if (handSelectionCountLabel) handSelectionCountLabel.textContent = `${selectedHandCardIds.size} selected in your hand`;
+  for (const item of handSelectionButtons) item.disabled = selectedHandCardIds.size === 0;
+  workspace?.querySelectorAll<HTMLElement>(".hand-card-slot[data-card-id]").forEach((item) => {
+    const selected = selectedHandCardIds.has(item.dataset.cardId ?? "");
+    item.classList.toggle("selected", selected);
+    const checkbox = item.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (checkbox) checkbox.checked = selected;
+  });
+}
+
 function selectionPayload(): { card_ids: string[]; expected_card_versions: Record<string, number> } {
   const cards: Card[] = [];
   for (const cardId of selectedCardIds) {
@@ -389,6 +403,7 @@ function renderTable(state: State): void {
   if (!workspace) return;
   selectedCardIds.clear(); selectionMode = false;
   selectionCountLabel = null; selectionActionButtons = [];
+  selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
   const heading = document.createElement("h2"); heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
@@ -476,23 +491,85 @@ function renderBoard(state: State): void {
   board.append(surface);
 
   const currentParticipant = state.participants.find((participant) => participant.is_current);
-  const handCards = currentParticipant ? state.cards.filter((card) => card.location_type === "hand" && card.hand_participant_id === currentParticipant.id) : [];
+  const handCards = currentParticipant ? state.cards.filter((card) => card.location_type === "hand" && card.hand_participant_id === currentParticipant.id).sort((left, right) => (left.hand_order ?? 0) - (right.hand_order ?? 0) || left.id.localeCompare(right.id)) : [];
   const hand = document.createElement("div"); hand.className = "hand-tray";
   const handHeading = document.createElement("h3"); handHeading.textContent = `Your hand (${handCards.length})`; hand.append(handHeading);
   const handRow = document.createElement("div"); handRow.className = "hand-cards";
+  const recipients = state.participants.filter((participant) => !participant.is_current && (participant.role === "host" || participant.role === "player"));
+  let playerNumber = 0;
+  const recipientLabels = new Map(recipients.map((participant) => [participant.id, participant.role === "host" ? "Host" : `Player ${++playerNumber}`]));
   if (handCards.length === 0) {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Your hand is empty."; handRow.append(empty);
   }
   handCards.forEach((card, index) => {
     const item = renderCard(card, index, true, canManageCards);
+    const slot = document.createElement("div"); slot.className = "hand-card-slot"; slot.dataset.cardId = card.id;
+    slot.append(item);
     if (canManageCards) {
+      const tools = document.createElement("div"); tools.className = "hand-card-tools";
+      const select = document.createElement("input"); select.type = "checkbox";
+      const selectLabel = document.createElement("label"); selectLabel.append(select, document.createTextNode(`Select hand card ${index + 1}`));
+      select.setAttribute("aria-label", `Select hand card ${index + 1}${card.card_label ? `, ${card.card_label}` : ""}`);
+      select.checked = selectedHandCardIds.has(card.id);
+      select.addEventListener("change", () => {
+        if (select.checked) selectedHandCardIds.add(card.id); else selectedHandCardIds.delete(card.id);
+        updateHandSelectionUi();
+      });
+      tools.append(selectLabel);
+      const reorder = (toIndex: number): void => {
+        if (toIndex < 0 || toIndex >= handCards.length) return;
+        const next = [...handCards];
+        const selected = next[index]; const adjacent = next[toIndex];
+        if (!selected || !adjacent) return;
+        next[index] = adjacent; next[toIndex] = selected;
+        void action(state.session.id, "reorder_hand", { card_ids: next.map((handCard) => handCard.id) });
+      };
+      const earlier = button(`Move hand card ${index + 1} earlier`, () => reorder(index - 1), true); earlier.disabled = index === 0;
+      const later = button(`Move hand card ${index + 1} later`, () => reorder(index + 1), true); later.disabled = index === handCards.length - 1;
+      tools.append(earlier, later);
       const playDown = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
       const playUp = button("Play face up", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "up", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
       item.append(playDown, playUp);
     }
-    handRow.append(item);
+    handRow.append(slot);
   });
-  hand.append(handRow); board.append(hand);
+  hand.append(handRow);
+  if (canManageCards) {
+    const handActions = document.createElement("div"); handActions.className = "hand-selection-tools";
+    handSelectionCountLabel = document.createElement("span"); handSelectionCountLabel.textContent = "0 selected in your hand"; handSelectionCountLabel.setAttribute("aria-live", "polite"); handActions.append(handSelectionCountLabel);
+    const selectedHandCards = (): Card[] => handCards.filter((card) => selectedHandCardIds.has(card.id));
+    const versionPayload = (): { card_ids: string[]; expected_card_versions: Record<string, number> } => {
+      const cards = selectedHandCards();
+      return { card_ids: cards.map((card) => card.id), expected_card_versions: Object.fromEntries(cards.map((card) => [card.id, card.version])) };
+    };
+    if (recipients.length > 0) {
+      const recipient = document.createElement("select"); recipient.setAttribute("aria-label", "Give selected cards to");
+      for (const participant of recipients) {
+        const option = document.createElement("option"); option.value = participant.id; option.textContent = `${recipientLabels.get(participant.id)} · ${participant.hand_count} in hand`; recipient.append(option);
+      }
+      handActions.append(labelled("Give selected cards to", recipient));
+      const give = button("Give selected cards", () => {
+        const selected = versionPayload();
+        if (selected.card_ids.length === 0) return;
+        selectedHandCardIds.clear(); updateHandSelectionUi();
+        void action(state.session.id, "give_cards", { recipient_participant_id: recipient.value, ...selected });
+      }, true);
+      give.disabled = selectedHandCardIds.size === 0; handSelectionButtons.push(give); handActions.append(give);
+    }
+    if (currentCan("deck.manage")) {
+      for (const [label, position] of [["Return selected hand cards to source decks top", "top"], ["Return selected hand cards to source decks bottom", "bottom"]] as const) {
+        const returnCards = button(label, () => {
+          const selected = versionPayload();
+          if (selected.card_ids.length === 0) return;
+          selectedHandCardIds.clear(); updateHandSelectionUi();
+          void action(state.session.id, "return_to_source_decks", { position, ...selected });
+        }, true);
+        returnCards.disabled = selectedHandCardIds.size === 0; handSelectionButtons.push(returnCards); handActions.append(returnCards);
+      }
+    }
+    hand.append(handActions);
+  }
+  board.append(hand);
   workspace.append(board);
 }
 
@@ -601,7 +678,7 @@ function surfaceSelectionMode(enabled: boolean): void {
 function renderCard(card: Card, index: number, inHand = false, interactive = true): HTMLElement {
   const item = document.createElement("article");
   item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
-  if (interactive) { item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-pressed", "false"); }
+  if (interactive && !inHand) { item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-pressed", "false"); }
   item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);

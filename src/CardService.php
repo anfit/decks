@@ -300,6 +300,26 @@ final class CardService
 
     public static function giveCards(PDO $database, array $session, array $member, array $payload): array
     {
+        self::assertPlayer($session, $member);
+        $ids = $payload['card_ids'] ?? [];
+        $versions = $payload['expected_card_versions'] ?? null;
+        if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
+        if (!is_array($versions) || count($versions) !== count($ids)) throw new RuntimeException('Expected card versions are required.');
+        if ((string) ($payload['recipient_participant_id'] ?? '') === (string) $member['id']) throw new RuntimeException('Choose another participant.');
+        foreach ($ids as $rawId) {
+            $cardId = (string) $rawId;
+            if (!array_key_exists($cardId, $versions) || filter_var($versions[$cardId], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected card versions are required.');
+            $card = self::card($database, (string) $session['id'], $cardId);
+            self::assertVersion($card, ['expected_card_version' => $versions[$cardId]]);
+            if ($card['location_type'] !== 'hand' || (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('Only your own hand cards can be given.');
+            self::assertCanControl($card, $member);
+        }
+        $result = self::giveCardsCore($database, $session, $member, $payload);
+        return ['card_count' => (int) $result['card_count']];
+    }
+
+    private static function giveCardsCore(PDO $database, array $session, array $member, array $payload): array
+    {
         self::assertPlayer($session,$member);$recipient=(string)($payload['recipient_participant_id']??'');$target=$database->prepare("SELECT id FROM session_participants WHERE session_id=:session AND id=:id AND removed_at IS NULL AND role IN ('host','player')");$target->execute(['session'=>$session['id'],'id'=>$recipient]);if(!$target->fetch())throw new RuntimeException('Recipient is invalid.');$ids=$payload['card_ids']??[];if(!is_array($ids)||count($ids)<1||count($ids)>100||count(array_unique(array_map('strval',$ids)))!==count($ids))throw new RuntimeException('Card selection is invalid.');$versions=is_array($payload['expected_card_versions']??null)?$payload['expected_card_versions']:[];$order=self::nextOrder($database,$session['id'],'hand',$recipient);$update=$database->prepare("UPDATE session_cards SET hand_participant_id=:participant,order_key=:order,face_state='private',owner_user_id=NULL,version=version+1 WHERE id=:id");$moved=[];foreach($ids as $index=>$id){$card=self::card($database,$session['id'],(string)$id);if(array_key_exists((string)$id,$versions))self::assertVersion($card,['expected_card_version'=>$versions[(string)$id]]);if($card['location_type']!=='hand'||(string)$card['hand_participant_id']!==(string)$member['id'])throw new RuntimeException('Only your own hand cards can be given.');self::assertCanControl($card,$member);$update->execute(['participant'=>$recipient,'order'=>$order+(($index+1)*1000),'id'=>$card['id']]);$moved[]=(string)$card['id'];}self::bumpHand($database,$session['id'],(string)$member['id']);self::bumpHand($database,$session['id'],$recipient);return ['recipient_participant_id'=>$recipient,'card_count'=>count($moved)];
     }
 
@@ -480,7 +500,7 @@ final class CardService
             $card = self::card($database, (string) $session['id'], $cardId);
             self::assertVersion($card, ['expected_card_version' => $versions[$cardId]]);
             self::assertCanControl($card, $member);
-            if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards may be returned to their source decks.');
+            if (!in_array($card['location_type'], ['table', 'hand'], true)) throw new RuntimeException('Only visible table or own-hand cards may be returned to their source decks.');
             $sourceDeckId = (string) $card['source_deck_id'];
             if ($sourceDeckId === '') throw new RuntimeException('Card source deck is unavailable.');
             $groups[$sourceDeckId]['card_ids'][] = $cardId;
