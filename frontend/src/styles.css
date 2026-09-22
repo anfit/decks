@@ -74,4 +74,7 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .pile-advanced { width: 100%; padding: .5rem; border: 1px solid #cbd5dc; border-radius: .45rem; background: #f8fafb; }
 .pile-advanced summary { cursor: pointer; font-weight: 600; }
 .pile-advanced-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .65rem; margin-top: .65rem; align-items: end; }
+.action-history { max-height: 18rem; overflow: auto; }
+.action-history h3 { margin: 0; }
+.action-history ol { margin: 0; padding-left: 1.5rem; line-height: 1.6; }
 @media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .table-surface { min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .table-pile { width: 8rem; } .table-pile-stack { width: 5.5rem; min-height: 6rem; } .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select, .table-pile-controls button { min-height: 2.75rem; } }

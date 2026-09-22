@@ -154,10 +154,15 @@ final class ActionService
     public static function changes(PDO $database, string $sessionId, string $userId, int $after): array
     {
         $snapshot = self::snapshot($database, $sessionId, $userId);
-        $statement = $database->prepare('SELECT revision, action_type, public_payload, created_at FROM session_events WHERE session_id = :session AND revision > :after ORDER BY revision LIMIT 100');
+        $statement = $database->prepare('SELECT revision, action_type, actor_user_id, created_at FROM session_events WHERE session_id = :session AND revision > :after ORDER BY revision LIMIT 100');
         $statement->execute(['session' => $sessionId, 'after' => $after]);
         $events = [];
-        foreach ($statement as $row) $events[] = ['revision' => (int) $row['revision'], 'action_type' => (string) $row['action_type'], 'created_at' => (string) $row['created_at']];
+        foreach ($statement as $row) $events[] = [
+            'revision' => (int) $row['revision'],
+            'action_type' => (string) $row['action_type'],
+            'actor' => $row['actor_user_id'] !== null && (string) $row['actor_user_id'] === $userId ? 'you' : 'participant',
+            'created_at' => (string) $row['created_at'],
+        ];
         return ['from_revision' => $after, 'to_revision' => $snapshot['revision'], 'events' => $events, 'snapshot' => $snapshot];
     }
 

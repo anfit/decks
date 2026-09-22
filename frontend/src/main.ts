@@ -7,6 +7,7 @@ type TemplateVersion = { id: string; version: number; definition_count: number }
 type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
+type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
 type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
@@ -16,6 +17,25 @@ const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "card.manage", label: "Card actions" }, { key: "pile.manage", label: "Pile actions" },
   { key: "lock.manage", label: "Lock actions" }, { key: "card.undo", label: "Undo" },
 ];
+const ACTION_DESCRIPTIONS: Record<string, string> = {
+  start_session: "started the session", end_session: "ended the session", leave_session: "left the session",
+  transfer_host: "transferred the host role", remove_participant: "removed a participant", restore_participant: "restored a participant",
+  set_participant_capabilities: "changed participant permissions", instantiate_deck: "added a deck", configure_table: "configured the table",
+  draw_top: "drew a card from a deck", draw_bottom: "drew a card from a deck", draw_n: "drew cards from a deck", deal: "dealt cards",
+  return_top: "returned cards to a deck", return_bottom: "returned cards to a deck", shuffle_deck: "shuffled a deck", cut_deck: "cut a deck",
+  insert_cards: "inserted cards into a deck", split_deck: "split a deck", move_card: "moved a card", move_cards: "moved cards",
+  rotate_card: "rotated a card", rotate_cards: "rotated cards", flip_card: "flipped a card", turn_face_up: "turned a card face up",
+  turn_face_down: "turned a card face down", set_cards_face: "changed card faces", reorder_cards: "changed card order",
+  move_to_hand: "moved a card to a hand", play_from_hand: "played a card from a hand", reorder_hand: "reordered a hand",
+  give_cards: "transferred cards between hands", peek_card: "peeked at a card", remove_card: "removed a card from play",
+  restore_card: "restored a card to a deck", lock_card: "locked a card", unlock_card: "unlocked a card", create_pile: "created a pile",
+  move_to_pile: "moved cards to a pile", draw_pile_top: "drew from a pile", draw_pile_bottom: "drew from a pile",
+  split_pile: "split a pile", merge_piles: "merged piles", collect_spread: "collected cards into a pile", move_pile: "moved a pile",
+  rotate_pile: "rotated a pile", label_pile: "changed a pile label", lock_pile: "locked a pile", unlock_pile: "unlocked a pile",
+  shuffle_pile: "shuffled a pile", reverse_pile: "reversed a pile", flip_pile: "flipped a pile", spread_pile: "spread a pile",
+  merge_pile_top: "returned a pile to a deck", merge_pile_bottom: "returned a pile to a deck", collect_all: "collected all cards",
+  reset_session: "reset the table", create_zone: "created a zone", delete_zone: "removed a zone", undo_action: "undid a spatial action",
+};
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
@@ -378,6 +398,7 @@ function renderTable(state: State): void {
   if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
   for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
   workspace.append(controls);
+  workspace.append(renderRecentActions(state));
   renderBoard(state);
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);
 }
@@ -418,6 +439,44 @@ function renderBoard(state: State): void {
   });
   hand.append(handRow); board.append(hand);
   workspace.append(board);
+}
+
+function renderRecentActions(state: State): HTMLElement {
+  const section = document.createElement("section"); section.className = "panel action-history";
+  const heading = document.createElement("h3"); heading.textContent = "Recent actions"; section.append(heading);
+  const statusMessage = document.createElement("p"); statusMessage.className = "muted"; statusMessage.setAttribute("aria-live", "polite"); statusMessage.textContent = "Loading recent actions…"; section.append(statusMessage);
+  void loadRecentActions(state.session.id, state.revision, section);
+  return section;
+}
+
+async function loadRecentActions(sessionId: string, revision: number, section: HTMLElement): Promise<void> {
+  try {
+    const after = Math.max(0, revision - 50);
+    const result = await api(`/api/sessions/${sessionId}/changes?after=${after}`);
+    if (!section.isConnected || currentState?.session.id !== sessionId) return;
+    const events = (result.changes?.events as ActionEvent[] ?? []).slice(-20).reverse();
+    section.replaceChildren();
+    const heading = document.createElement("h3"); heading.textContent = "Recent actions"; section.append(heading);
+    if (events.length === 0) {
+      const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "No actions recorded yet."; section.append(empty); return;
+    }
+    const list = document.createElement("ol");
+    for (const event of events) {
+      const item = document.createElement("li");
+      const actor = event.actor === "you" ? "You" : "A participant";
+      const description = ACTION_DESCRIPTIONS[event.action_type] ?? "recorded a table action";
+      const date = new Date(event.created_at);
+      const time = Number.isNaN(date.getTime()) ? "" : ` · ${date.toLocaleString()}`;
+      item.textContent = `${actor} ${description} · revision ${event.revision}${time}`;
+      list.append(item);
+    }
+    section.append(list);
+  } catch {
+    if (!section.isConnected || currentState?.session.id !== sessionId) return;
+    section.replaceChildren();
+    const heading = document.createElement("h3"); heading.textContent = "Recent actions"; section.append(heading);
+    const unavailable = document.createElement("p"); unavailable.className = "muted"; unavailable.textContent = "Recent actions are unavailable right now."; section.append(unavailable);
+  }
 }
 
 function renderPile(state: State, pile: Pile, interactive: boolean): HTMLElement {

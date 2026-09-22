@@ -47,6 +47,8 @@ class DecksContractTest(unittest.TestCase):
     def test_changes_endpoint_never_replays_raw_action_payloads(self) -> None:
         source = read_text("src/ActionService.php")
         self.assertIn("'action_type' => (string) $row['action_type']", source)
+        self.assertIn("'actor' => $row['actor_user_id'] !== null", source)
+        self.assertIn("? 'you' : 'participant'", source)
         self.assertNotIn("'payload' => json_decode((string) $row['public_payload']", source)
         self.assertIn("sanitizeEvent($type, $result)", source)
         self.assertIn("'card_definition_id', 'cards'", source)
@@ -56,6 +58,16 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Overlapping zones have conflicting effects", card_source)
         zone_source = read_text("src/ZoneService.php")
         self.assertIn("['none', 'face_up', 'face_down', 'stack', 'align', 'fan', 'owner_private']", zone_source)
+
+    def test_frontend_action_history_uses_safe_descriptions_and_bounded_changes(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        self.assertIn('heading.textContent = "Recent actions"', frontend)
+        self.assertIn("revision - 50", frontend)
+        self.assertIn("slice(-20).reverse()", frontend)
+        self.assertIn('ACTION_DESCRIPTIONS[event.action_type] ?? "recorded a table action"', frontend)
+        self.assertIn('event.actor === "you" ? "You" : "A participant"', frontend)
+        self.assertIn("Recent actions are unavailable right now.", frontend)
+        self.assertNotIn("event.payload", frontend)
 
     def test_frontend_draws_from_authorized_container_projection(self) -> None:
         source = read_text("frontend/src/main.ts")
