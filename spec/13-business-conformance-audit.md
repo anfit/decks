@@ -1,0 +1,50 @@
+# Business conformance audit
+
+Audit date: 2026-09-22  
+Business source: Online Deck Table — Business Logic Specification, revision 1, business-spec hash `3192646E4C3C2B914AF8F46A9711ECA6A38D4424B6D991D82D62EF96C1B69106` (as recorded in `spec/00-scope.md`).  
+Audited source: commit `6bb2ea9` and production release `f9d9480cadf03788`.
+
+## Method and evidence
+
+The audit compared the revision-1 business specification with the committed PHP services, PostgreSQL schema, HTTP/WebSocket projections, frontend, contract tests, and the deployed health endpoints. The production release reports all three lifecycles healthy, with the application, realtime listener, and mail unit active. The focused contract suite passes 12 tests; TypeScript type checking, the frontend build, and `git diff --check` pass.
+
+The browser acceptance check is recorded in the execution plan after the admin session is completed. This document deliberately separates server-side conformance from whether the normal web UI exposes the behavior.
+
+## Findings
+
+### Conformant or substantially conformant
+
+- PHP/PostgreSQL own durable state and actions. Actions run in a transaction, lock the session row, advance the revision, enforce idempotency, and emit sanitized events.
+- Card uniqueness, locations, ordering, locks, versions, and session lifecycle are represented by database constraints and service validation. Stale revisions and invalid targets fail atomically.
+- Hidden hands and private cards are filtered from public projections. Face-down card identities, protected asset paths, private metadata, and hidden ordering are not sent to unauthorized clients or logs.
+- Server-side randomness is used for shuffle, deal, cut, and insertion. The action/event path does not expose hidden random results.
+- Authentication, invitations, join, leave, reconnect, end, host recovery, and participant roles are implemented. Realtime tickets and revisioned changes support reconnect.
+- Deck templates, versions, card definitions, uploaded assets, mats, presets, and generic server-side zones exist in the backend model. Zone effects are generic and privacy-aware.
+- The implemented undo path is restricted to actor-owned spatial move/rotate actions and validates the current version; reveal, random, private, and stale-state actions are not unilaterally undone.
+
+### Partial conformance and gaps
+
+The product surface is materially behind the business MVP even where backend primitives exist.
+
+| Priority | Area | Evidence and required follow-up |
+| --- | --- | --- |
+| P0 | Primary web flow | The normal UI only creates or joins a blank table and exposes Refresh, Draw top, Shuffle, Cut, Deal one each, Collect all, and Reset. It cannot choose a template, deck, preset, access mode, participant permissions, or spectator role. Wire the intended setup and core actions into the UI. |
+| P1 | Capability permissions | `session_participants.capabilities` is stored, but service checks and UI controls do not consistently enforce or configure capability-level permissions. Add an explicit policy matrix and host controls. |
+| P1 | Deal semantics | `per_participant` computes a mode but currently iterates round-robin, so participant-at-a-time behavior is not implemented. Correct the service and add a contract test. |
+| P1 | Pile operations | Missing explicit pile draw top/bottom, pile split/merge, collect-spread, pile spatial move/rotate/z-order, labels, and locks. Add actions, authorization, projections, and tests. |
+| P1 | Card and multi-card actions | Missing z-order front/back/layer actions, multi-card rotate/face actions, and an explicit public reveal-selection action. Add atomic action variants and privacy tests. |
+| P1 | Session configuration | The create endpoint accepts only title/max participants; the UI has no deck/preset/access/permission configuration and joining hardcodes a player role. Add setup and role-aware join controls. |
+| P2 | Restore/collect modes | Restore is effectively bottom-like and ignores caller selection of top/bottom/shuffle. Collect always restores original template order, while the specification allows original, shuffle, or preserve modes. Add explicit modes and audit them. |
+| P2 | Presentation and observability | Cards render UUID prefixes rather than card art/meaningful labels, there is no action-log view, and face-down piles are omitted instead of showing a safe back/count representation. Improve the safe projection and operator feedback without revealing hidden identity. |
+| P2 | Administration | There are no explicit freeze/unfreeze controls or promote/demote/capability administration in the product surface. Add host-only controls if they remain in scope for the MVP. |
+
+## Conformance result
+
+The backend invariants and privacy boundary are largely conformant, but the business MVP is only partially delivered at the UI/product surface. The remaining plan must prioritize a complete session setup and card-table flow, then fill the missing pile/card semantics and permissions before treating the application as business-complete.
+
+## Required plan adjustments
+
+1. **S17 — Capability policy and session setup:** define and enforce capability checks, add deck/template/preset/access/role setup, and expose host controls.
+2. **S18 — Complete card and pile semantics:** fix deal mode; add missing pile, z-order, multi-card, reveal, restore, and collect modes with contract and privacy tests.
+3. **S19 — UX and browser acceptance:** expose the primary flow, meaningful card presentation, accessible actions, and end-to-end browser checks.
+4. Keep the external DKIM/DMARC, authorized SMTP test, and encrypted off-host backup gates in S15/S16 open until their evidence is supplied.
