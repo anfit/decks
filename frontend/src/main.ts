@@ -23,6 +23,10 @@ let csrf = "";
 let currentState: State | null = null;
 let socket: WebSocket | null = null;
 let realtimeRetry = 0;
+let selectionMode = false;
+const selectedCardIds = new Set<string>();
+let selectionCountLabel: HTMLElement | null = null;
+let selectionActionButtons: HTMLButtonElement[] = [];
 
 function setStatus(message: string, state: "ok" | "error" | "pending" = "pending"): void {
   if (!status) return;
@@ -151,6 +155,29 @@ function currentCan(capability: Capability): boolean {
   return participant ? effectiveCapability(participant, capability) : false;
 }
 
+function updateSelectionUi(): void {
+  if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
+  for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0;
+  workspace?.querySelectorAll<HTMLElement>(".table-surface .card[data-card-id]").forEach((item) => {
+    const selected = selectedCardIds.has(item.dataset.cardId ?? "");
+    item.classList.toggle("selected", selected);
+    item.setAttribute("aria-pressed", String(selected));
+  });
+}
+
+function selectionPayload(): { card_ids: string[]; expected_card_versions: Record<string, number> } {
+  const cards = currentState?.cards.filter((card) => selectedCardIds.has(card.id) && card.location_type === "table") ?? [];
+  return { card_ids: cards.map((card) => card.id), expected_card_versions: Object.fromEntries(cards.map((card) => [card.id, card.version])) };
+}
+
+function applySelectedAction(type: string, values: Record<string, unknown>): void {
+  if (!currentState || selectedCardIds.size === 0) return;
+  const payload = { ...selectionPayload(), ...values };
+  const sessionId = currentState.session.id;
+  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
+  void action(sessionId, type, payload);
+}
+
 function renderCapabilityControls(state: State): HTMLElement | null {
   const current = state.participants.find((participant) => participant.is_current);
   if (!current || current.role !== "host" || !currentCan("participant.manage")) return null;
@@ -177,6 +204,8 @@ function renderCapabilityControls(state: State): HTMLElement | null {
 
 function renderTable(state: State): void {
   if (!workspace) return;
+  selectedCardIds.clear(); selectionMode = false;
+  selectionCountLabel = null; selectionActionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
   const heading = document.createElement("h2"); heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
@@ -191,6 +220,29 @@ function renderTable(state: State): void {
   const capabilityPanel = renderCapabilityControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
+  if (currentCan("card.manage")) {
+    const selectCards = button("Select cards", () => {
+      selectionMode = !selectionMode;
+      selectedCardIds.clear();
+      selectCards.textContent = selectionMode ? "Finish selection" : "Select cards";
+      selectCards.setAttribute("aria-pressed", String(selectionMode));
+      surfaceSelectionMode(selectionMode);
+      updateSelectionUi();
+    }, true);
+    selectCards.setAttribute("aria-pressed", "false");
+    controls.append(selectCards);
+    const selectionTools = document.createElement("div"); selectionTools.className = "selection-tools";
+    selectionCountLabel = document.createElement("span"); selectionCountLabel.textContent = "0 selected"; selectionCountLabel.setAttribute("aria-live", "polite"); selectionTools.append(selectionCountLabel);
+    const groupAction = (label: string, type: string, values: Record<string, unknown>): void => {
+      const item = button(label, () => applySelectedAction(type, values), true); item.disabled = true; selectionActionButtons.push(item); selectionTools.append(item);
+    };
+    groupAction("Rotate selection 15°", "rotate_cards", { rotation_delta: 15 });
+    groupAction("Turn selected face up", "set_cards_face", { face_state: "up" });
+    groupAction("Turn selected face down", "set_cards_face", { face_state: "down" });
+    groupAction("Bring selection to front", "reorder_cards", { direction: "front" });
+    groupAction("Send selection to back", "reorder_cards", { direction: "back" });
+    controls.append(selectionTools);
+  }
   const deck = state.containers.decks[0];
   if (deck?.id && currentCan("deck.manage")) {
     controls.append(button("Draw top", () => void action(state.session.id, "draw_top", { deck_id: deck.id })));
@@ -261,10 +313,14 @@ function renderBoard(state: State): void {
   workspace.append(board);
 }
 
+function surfaceSelectionMode(enabled: boolean): void {
+  workspace?.querySelector(".table-surface")?.classList.toggle("selection-mode", enabled);
+}
+
 function renderCard(card: Card, index: number, inHand = false, interactive = true): HTMLElement {
   const item = document.createElement("article");
   item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
-  if (interactive) { item.tabIndex = 0; item.setAttribute("role", "button"); }
+  if (interactive) { item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-pressed", "false"); }
   item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);
@@ -275,6 +331,7 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
     item.title = "Drag to move. Double click to turn the card.";
     let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;
     item.addEventListener("pointerdown", (event) => {
+      if (selectionMode) return;
       item.setPointerCapture(event.pointerId);
       drag = { pointerX: event.clientX, pointerY: event.clientY, startX: x, startY: y, moved: false };
       item.classList.add("dragging");
@@ -293,8 +350,22 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
       const moved = drag.moved; drag = null; item.classList.remove("dragging");
       if (moved) void action(statefulSessionId(), "move_card", { card_id: card.id, x: nextX, y: nextY, rotation: card.rotation, z_index: card.z_index, expected_card_version: card.version });
     });
-    item.addEventListener("dblclick", () => void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }));
-    item.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); } });
+    item.addEventListener("dblclick", () => { if (!selectionMode) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); });
+    item.addEventListener("click", (event) => {
+      if (!selectionMode) return;
+      event.preventDefault();
+      if (selectedCardIds.has(card.id)) selectedCardIds.delete(card.id); else selectedCardIds.add(card.id);
+      updateSelectionUi();
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (selectionMode) {
+          if (selectedCardIds.has(card.id)) selectedCardIds.delete(card.id); else selectedCardIds.add(card.id);
+          updateSelectionUi();
+        } else void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version });
+      }
+    });
   }
   const label = document.createElement("strong");
   label.textContent = card.card_label || (card.face_state === "private" ? "Private card" : "Face down");

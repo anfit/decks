@@ -148,6 +148,39 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("currentCan(\"card.manage\")", frontend)
         self.assertIn("capability-row", styles)
 
+    def test_group_card_actions_validate_selection_privacy_and_expose_accessible_selection_tools(self) -> None:
+        card = read_text("src/CardService.php")
+        pile = read_text("src/PileService.php")
+        action = read_text("src/ActionService.php")
+        frontend = read_text("frontend/src/main.ts")
+        spec = read_text("spec/20-multi-card-and-z-order.md")
+        for method in ("public static function rotateCards", "public static function setCardsFace", "public static function reorderCards", "private static function tableSelection"):
+            self.assertIn(method, card)
+        self.assertIn("That table card is private.", card)
+        self.assertIn("That table card is private.", pile)
+        self.assertIn("Expected card versions are required.", card)
+        self.assertIn("'rotate_cards' => CardService::rotateCards", action)
+        self.assertIn("'set_cards_face' => CardService::setCardsFace", action)
+        self.assertIn("'reorder_cards' => CardService::reorderCards", action)
+        for label in ("Select cards", "Turn selected face up", "Bring selection to front", "Send selection to back"):
+            self.assertIn(label, frontend)
+        self.assertIn("expected_card_versions", frontend)
+        self.assertIn("atomic stale-selection rejection", spec)
+
+    def test_group_reorder_and_bulk_mutations_honor_locks_and_composite_capabilities(self) -> None:
+        card = read_text("src/CardService.php")
+        pile = read_text("src/PileService.php")
+        action = read_text("src/ActionService.php")
+        capabilities = read_text("spec/19-capability-policy.md")
+        self.assertIn("$card['locked_by'] !== null", card)
+        self.assertIn("$requiresCompaction", card)
+        self.assertIn("A table card is locked by another participant.", card)
+        self.assertIn("foreach ($rows as $card) self::assertCanControl($card, $member);", pile)
+        self.assertIn("count(array_unique(array_map('strval', $ids))) !== count($ids)", pile)
+        self.assertIn("public static function collectSpread", pile)
+        self.assertIn("$requiredCapabilities[] = 'pile.manage'", action)
+        self.assertIn("both `deck.manage` and `pile.manage`", capabilities)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)

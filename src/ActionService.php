@@ -26,9 +26,12 @@ final class ActionService
             if (!is_array($session)) throw new RuntimeException('Session not found.');
             $member = SessionService::membership($database, $sessionId, (string) $user['id']);
             if ($member === null) throw new RuntimeException('Active table membership required.');
+            $requiredCapabilities = [];
             $capability = self::capabilityForAction($type);
-            if ($capability !== null && !SessionService::hasCapability($member, $capability)) {
-                throw new RuntimeException('This participant is not allowed to perform that action.');
+            if ($capability !== null) $requiredCapabilities[] = $capability;
+            if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $requiredCapabilities[] = 'pile.manage';
+            foreach (array_unique($requiredCapabilities) as $requiredCapability) {
+                if (!SessionService::hasCapability($member, $requiredCapability)) throw new RuntimeException('This participant is not allowed to perform that action.');
             }
             $duplicate = $database->prepare(
                 'SELECT request_hash, status, revision, result FROM processed_actions
@@ -166,7 +169,7 @@ final class ActionService
             'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities' => 'participant.manage',
             'create_zone', 'delete_zone' => 'zone.manage',
             'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
-            'move_card', 'move_cards', 'rotate_card', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
+            'move_card', 'move_cards', 'rotate_card', 'rotate_cards', 'set_cards_face', 'reorder_cards', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
             'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom' => 'pile.manage',
             'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile' => 'lock.manage',
             'undo_action' => 'card.undo',
@@ -197,6 +200,9 @@ final class ActionService
             'restore_card' => CardService::restore($database, $session, $member, $payload),
             'lock_card', 'unlock_card' => CardService::lock($database, $session, $member, $payload, $type === 'lock_card'),
             'move_cards' => CardService::moveCards($database, $session, $member, $payload),
+            'rotate_cards' => CardService::rotateCards($database, $session, $member, $payload),
+            'set_cards_face' => CardService::setCardsFace($database, $session, $member, $payload),
+            'reorder_cards' => CardService::reorderCards($database, $session, $member, $payload),
             'reorder_hand' => CardService::reorderHand($database, $session, $member, $payload),
             'give_cards' => CardService::giveCards($database, $session, $member, $payload),
             'peek_card' => CardService::peek($database, $session, $member, $payload),

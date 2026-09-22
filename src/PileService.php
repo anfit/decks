@@ -27,22 +27,30 @@ final class PileService
         self::assertPileUnlocked($pile, $member);
         if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         $ids = $payload['card_ids'] ?? [];
-        if (!is_array($ids) || count($ids) < 1 || count($ids) > 100) throw new RuntimeException('Card selection is invalid.');
-        $cards = [];
+        if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
+        $cards = []; $sourcePiles = [];
         foreach ($ids as $id) {
             $card = self::card($database, $session['id'], (string) $id);
             if ((string) $card['location_type'] === 'deck') throw new RuntimeException('Draw a deck card before placing it in a pile.');
             self::assertCanControl($card, $member);
+            if ($card['location_type'] === 'pile') {
+                $sourcePile = self::pile($database, $session['id'], (string) $card['pile_id']);
+                self::assertPileUnlocked($sourcePile, $member);
+                $sourcePiles[(string) $sourcePile['id']] = true;
+            }
             $cards[] = $card;
         }
         $next = self::nextOrder($database, $session['id'], $pileId);
         $update = $database->prepare("UPDATE session_cards SET location_type = 'pile', deck_id = NULL, pile_id = :pile, hand_participant_id = NULL, order_key = :order, x = NULL, y = NULL, face_state = :face, version = version + 1 WHERE id = :id");
-        $moved = [];
+        $moved = []; $sourceHands = [];
         foreach ($cards as $index => $card) {
             $face = ($card['location_type'] === 'hand' || ($payload['face_state'] ?? 'down') !== 'up') ? 'down' : 'up';
             $update->execute(['pile' => $pileId, 'order' => $next + (($index + 1) * 1000), 'face' => $face, 'id' => $card['id']]);
+            if ($card['location_type'] === 'hand') $sourceHands[(string) $card['hand_participant_id']] = true;
             $moved[] = (string) $card['id'];
         }
+        foreach ($sourceHands as $participantId => $_) $database->prepare('UPDATE session_hands SET version = version + 1 WHERE session_id = :session AND participant_id = :participant')->execute(['session' => $session['id'], 'participant' => $participantId]);
+        foreach ($sourcePiles as $sourcePileId => $_) if ($sourcePileId !== $pileId) $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $sourcePileId]);
         $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pileId]);
         return ['pile_id' => $pileId, 'card_ids' => $moved];
     }
@@ -53,8 +61,9 @@ final class PileService
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
         self::assertPileUnlocked($pile, $member);
         if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
-        $cards = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
+        $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $rows = $cards->fetchAll();
+        foreach ($rows as $card) self::assertCanControl($card, $member);
         for ($i = count($rows) - 1; $i > 0; $i--) { $j = random_int(0, $i); [$rows[$i], $rows[$j]] = [$rows[$j], $rows[$i]]; }
         self::assignOrder($database, $rows);
         $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pile['id']]);
@@ -70,17 +79,18 @@ final class PileService
         $count = (int) ($payload['count'] ?? 1);
         if ($count < 1 || $count > 100) throw new RuntimeException('Draw count is invalid.');
         $order = $direction === 'bottom' ? 'DESC' : 'ASC';
-        $cards = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key {$order} LIMIT {$count} FOR UPDATE");
+        $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key {$order} LIMIT {$count} FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]);
         $rows = $cards->fetchAll();
         if (count($rows) < $count) throw new RuntimeException('The pile does not contain enough cards.');
+        foreach ($rows as $card) self::assertCanControl($card, $member);
         $next = $database->prepare("SELECT coalesce(max(order_key), 0) FROM session_cards WHERE session_id = :session AND location_type = 'hand' AND hand_participant_id = :participant");
         $next->execute(['session' => $session['id'], 'participant' => $member['id']]);
         $orderKey = (int) $next->fetchColumn();
         $update = $database->prepare("UPDATE session_cards SET location_type='hand', deck_id=NULL, pile_id=NULL, hand_participant_id=:participant, order_key=:order_key, x=NULL, y=NULL, face_state='private', owner_user_id=NULL, version=version+1 WHERE id=:id");
         foreach ($rows as $index => $row) $update->execute(['participant' => $member['id'], 'order_key' => $orderKey + (($index + 1) * 1000), 'id' => $row['id']]);
         $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pile['id']]);
-        self::normalizeHand($database, $session['id'], (string) $member['id']);
+        $database->prepare('UPDATE session_hands SET version = version + 1 WHERE session_id = :session AND participant_id = :participant')->execute(['session' => $session['id'], 'participant' => $member['id']]);
         return ['pile_id' => (string) $pile['id'], 'card_count' => count($rows), 'direction' => $direction];
     }
 
@@ -121,8 +131,9 @@ final class PileService
         $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $sourceId]); $moving = $cards->fetchAll();
         foreach ($moving as $card) self::assertCanControl($card, $member);
-        $existing = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
+        $existing = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $existing->execute(['session' => $session['id'], 'pile' => $targetId]); $remaining = $existing->fetchAll();
+        foreach ($remaining as $card) self::assertCanControl($card, $member);
         $position = ($payload['position'] ?? 'bottom') === 'top' ? 'top' : 'bottom';
         $ordered = $position === 'top' ? array_merge($moving, $remaining) : array_merge($remaining, $moving);
         $update = $database->prepare("UPDATE session_cards SET pile_id=:pile, order_key=:temporary, version=version+1 WHERE session_id=:session AND id=:id");
@@ -138,7 +149,7 @@ final class PileService
         self::assertPlayer($session, $member);
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? '')); self::assertPileUnlocked($pile, $member);
         if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
-        $ids = $payload['card_ids'] ?? []; if (!is_array($ids) || count($ids) < 1 || count($ids) > 100) throw new RuntimeException('Card selection is invalid.');
+        $ids = $payload['card_ids'] ?? []; if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
         $cards = []; foreach ($ids as $id) { $card = self::card($database, $session['id'], (string) $id); if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards can be collected.'); self::assertCanControl($card, $member); $cards[] = $card; }
         $next = self::nextOrder($database, $session['id'], $pile['id']);
         $update = $database->prepare("UPDATE session_cards SET location_type='pile', deck_id=NULL, pile_id=:pile, hand_participant_id=NULL, order_key=:order, x=NULL, y=NULL, version=version+1 WHERE session_id=:session AND id=:id");
@@ -182,8 +193,10 @@ final class PileService
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
         self::assertPileUnlocked($pile, $member);
         if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
-        $cards = $database->prepare("SELECT id, face_state FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
-        $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $rows = array_reverse($cards->fetchAll());
+        $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
+        $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $rows = $cards->fetchAll();
+        foreach ($rows as $card) self::assertCanControl($card, $member);
+        $rows = array_reverse($rows);
         $update = $database->prepare('UPDATE session_cards SET order_key = :order, face_state = :face, version = version + 1 WHERE id = :id');
         foreach ($rows as $index => $row) {
             $face = $flipFaces ? (($row['face_state'] ?? 'down') === 'up' ? 'down' : 'up') : (string) $row['face_state'];
@@ -227,8 +240,9 @@ final class PileService
         $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $moving = $cards->fetchAll();
         foreach ($moving as $card) self::assertCanControl($card, $member);
-        $all = $database->prepare("SELECT id FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key");
+        $all = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key FOR UPDATE");
         $all->execute(['session' => $session['id'], 'deck' => $deckId]); $remaining = $all->fetchAll();
+        foreach ($remaining as $card) self::assertCanControl($card, $member);
         $ordered = $position === 'top' ? array_merge($moving, $remaining) : array_merge($remaining, $moving);
         $update = $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = :deck, pile_id = NULL, hand_participant_id = NULL, order_key = :temp, x = NULL, y = NULL, face_state = 'down', version = version + 1 WHERE id = :id");
         foreach ($ordered as $index => $card) $update->execute(['deck' => $deckId, 'temp' => -1000000 + $index, 'id' => $card['id']]);
@@ -240,8 +254,7 @@ final class PileService
 
     private static function assertPlayer(array $session, array $member): void { if (!in_array($member['role'], ['host', 'player'], true)) throw new RuntimeException('Player permission required.'); if ($session['status'] === 'ended') throw new RuntimeException('Session has ended.'); }
     private static function assertPileUnlocked(array $pile, array $member): void { if ($pile['locked_by'] !== null && (string) $pile['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('Pile is locked by another participant.'); }
-    private static function normalizeHand(PDO $database, string $sessionId, string $participantId): void { $cards = $database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='hand' AND hand_participant_id=:participant ORDER BY order_key, id"); $cards->execute(['session'=>$sessionId,'participant'=>$participantId]); self::assignOrder($database, $cards->fetchAll()); }
-    private static function assertCanControl(array $card, array $member): void { if ($card['location_type'] === 'hand' && (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('That hand is private.'); if ($card['location_type'] === 'pile' && $card['face_state'] === 'private') throw new RuntimeException('That pile card is private.'); if ($card['locked_by'] !== null && (string) $card['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.'); if ($card['location_type'] === 'removed') throw new RuntimeException('That card is removed from play.'); }
+    private static function assertCanControl(array $card, array $member): void { if ($card['location_type'] === 'hand' && (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('That hand is private.'); if ($card['location_type'] === 'pile' && $card['face_state'] === 'private') throw new RuntimeException('That pile card is private.'); if ($card['location_type'] === 'table' && $card['face_state'] === 'private' && (string) $card['owner_user_id'] !== (string) $member['user_id']) throw new RuntimeException('That table card is private.'); if ($card['locked_by'] !== null && (string) $card['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.'); if ($card['location_type'] === 'removed') throw new RuntimeException('That card is removed from play.'); }
     private static function pile(PDO $database, string $sessionId, string $pileId): array { $s = $database->prepare('SELECT * FROM session_piles WHERE session_id = :session AND id = :id FOR UPDATE'); $s->execute(['session' => $sessionId, 'id' => $pileId]); $row = $s->fetch(); if (!is_array($row)) throw new RuntimeException('Pile not found.'); return $row; }
     private static function card(PDO $database, string $sessionId, string $cardId): array { $s = $database->prepare('SELECT * FROM session_cards WHERE session_id = :session AND id = :id FOR UPDATE'); $s->execute(['session' => $sessionId, 'id' => $cardId]); $row = $s->fetch(); if (!is_array($row)) throw new RuntimeException('Card not found.'); return $row; }
     private static function nextOrder(PDO $database, string $sessionId, string $pileId): int { $s = $database->prepare("SELECT coalesce(max(order_key), 0) FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile"); $s->execute(['session' => $sessionId, 'pile' => $pileId]); return (int) $s->fetchColumn(); }
