@@ -107,6 +107,10 @@ Source commit `1dc3085` now supplies owner-only hand ordering, accessible earlie
 
 1. Release the current source through the trusted, secret-complete deploy setup, then repeat keyboard flip/restore while observing a stable connection and an independent second browser receiving the authorized update.
 2. Test the actual current per-deck, action-history, source-return, and private-hand controls after deployment; include player/spectator privacy, capability and stale-state feedback. The new hand controls remove reorder/give/source-return from the remaining implementation backlog, not from acceptance testing.
-3. Add clear hand-to-pile/reveal, selected move/align, remove/restore, pile-to-deck and remaining pile-operation affordances, plus host participant recovery controls. Make unavailable actions explain the permission or lock reason without leaking private details.
+3. Add clear private-hand reveal, selected move/align, remove/restore, pile-to-deck and remaining pile-operation affordances, plus host participant recovery controls. Hand-to-pile now exists in source and needs deployed acceptance. Make unavailable actions explain the permission or lock reason without leaking private details.
 4. Improve the empty-hand contrast, table-list scanability (names/search/grouping or equivalent), long heading density, card back/art treatment, and narrow-screen pan/zoom. Complete keyboard and touch review at a narrow viewport.
 5. Keep the UX result provisional until the exact deployed source has passed authenticated two-client browser acceptance; retain SMTP and backup readiness as distinct launch gates.
+
+## Source response: hand-to-pile control — 2026-09-22
+
+After the audit, commit `d99c0e9` added an accessible destination selector and button to the owner's selected-hand toolbar. It lists only unlocked piles by safe label and count, requires both card and pile capabilities, and sends exact card and pile versions. The control is not yet live: the production release predates it, and the current browser cannot exercise populated hands or verify its two-client behavior. Contract tests are 29/29, TypeScript typecheck and production build pass; PHP/runtime behavior remains unverified. Keep the control in deployment acceptance, not in the remaining source UX backlog.
