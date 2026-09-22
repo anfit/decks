@@ -6,4 +6,6 @@ Piles are first-class public containers. Their card order is server-authoritativ
 
 Hosts and players may move or rotate a pile, set its label, and lock/unlock it. A pile lock blocks foreign card and spatial mutations until its owner unlocks it; every mutation accepts the expected pile version and advances it atomically. Hidden/private cards remain subject to the existing card-control and projection rules.
 
-Acceptance requires action-registry coverage, transaction-scoped version checks, same-session validation, sanitized events, and focused contract tests for draw, split, merge, collect-spread, spatial updates and locks.
+The table UI exposes pile labeling, splitting a top count into a new pile, merging a pile into another at top or bottom, and collecting an explicitly selected set of visible table cards into a pile. These controls are reachable by keyboard, show current container counts, include expected pile versions, and are hidden or disabled when the participant lacks the required capability, the pile is locked, or the operation has no valid target. Collect-spread reuses transient table selection; it never exposes card definitions or identities beyond the current authorized projection.
+
+Acceptance requires action-registry coverage, transaction-scoped version checks, same-session validation, sanitized events, and focused contract tests for draw, split, merge, collect-spread, spatial updates and locks. Browser acceptance must exercise populated split, both merge positions, label changes, collect-spread, stale pile versions, and a locked-pile view.
