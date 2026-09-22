@@ -9,6 +9,8 @@ class DecksContractTest(unittest.TestCase):
     def test_snapshot_uses_container_counts_and_filters_private_hand_rows(self) -> None:
         source = read_text("src/ActionService.php")
         self.assertIn("'containers' => $containerProjection", source)
+        self.assertIn("FROM session_decks d", source)
+        self.assertIn("'label' => $deck['label']", source)
         self.assertIn("$card['location_type'] === 'removed'", source)
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
         self.assertIn("'zones' => $zoneProjection", source)
@@ -72,7 +74,12 @@ class DecksContractTest(unittest.TestCase):
     def test_frontend_draws_from_authorized_container_projection(self) -> None:
         source = read_text("frontend/src/main.ts")
         self.assertIn("containers: { decks", source)
-        self.assertIn("const deck = state.containers.decks[0]", source)
+        self.assertIn("for (const deck of state.containers.decks)", source)
+        self.assertIn("function renderDeckControls(state: State, deck: Deck)", source)
+        self.assertIn('button("Draw top"', source)
+        self.assertIn('button("Draw bottom"', source)
+        self.assertIn('button("Draw N from top"', source)
+        self.assertIn('button("Draw N from bottom"', source)
         self.assertIn("pointerdown", source)
         self.assertIn("expected_card_version", source)
 

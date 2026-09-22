@@ -5,12 +5,13 @@ type Session = { id: string; title: string | null; status: string; revision: num
 type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
+type Deck = { id: string; label: string | null; card_count: number };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
   { key: "zone.manage", label: "Zone administration" }, { key: "deck.manage", label: "Deck actions" },
@@ -333,6 +334,50 @@ function renderCapabilityControls(state: State): HTMLElement | null {
   return panel;
 }
 
+function renderDeckControls(state: State, deck: Deck): HTMLElement {
+  const panel = document.createElement("section"); panel.className = "panel deck-controls";
+  const heading = document.createElement("h3"); heading.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; panel.append(heading);
+  if (!currentCan("deck.manage")) return panel;
+  const count = document.createElement("input"); count.type = "number"; count.min = "1"; count.max = "100"; count.value = "2";
+  panel.append(labelled("Cards to draw", count));
+  const target = document.createElement("select"); target.setAttribute("aria-label", `Draw destination for ${deck.label || "deck"}`);
+  const destinations: Array<[string, string]> = [["table", "Public table"], ["hand", "Your hand"]];
+  for (const [value, text] of destinations) {
+    const option = document.createElement("option"); option.value = value; option.textContent = text; target.append(option);
+  }
+  if (currentCan("pile.manage")) {
+    for (const pile of state.containers.piles.filter((item) => !item.locked)) {
+      const option = document.createElement("option"); option.value = `pile:${pile.id}`; option.textContent = `Pile: ${pile.label || "Pile"} · ${pile.card_count} cards`; target.append(option);
+    }
+  }
+  panel.append(labelled("Draw destination", target));
+  const draw = (direction: "top" | "bottom", requestedCount: number): void => {
+    if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 100) return;
+    const targetValue = target.value;
+    const payload: Record<string, unknown> = { deck_id: deck.id, count: requestedCount, direction, target: targetValue.startsWith("pile:") ? "pile" : targetValue };
+    if (targetValue.startsWith("pile:")) {
+      const pile = state.containers.piles.find((item) => item.id === targetValue.slice(5));
+      if (!pile || pile.locked) { setStatus("That pile is no longer available. Refresh the table and try again.", "error"); return; }
+      payload.pile_id = pile.id; payload.expected_pile_version = pile.version;
+    }
+    const type = requestedCount === 1 ? (direction === "top" ? "draw_top" : "draw_bottom") : "draw_n";
+    void action(state.session.id, type, payload);
+  };
+  const drawTop = button("Draw top", () => draw("top", 1));
+  const drawBottom = button("Draw bottom", () => draw("bottom", 1), true);
+  const drawNTop = button("Draw N from top", () => draw("top", Number(count.value)), true);
+  const drawNBottom = button("Draw N from bottom", () => draw("bottom", Number(count.value)), true);
+  const shuffle = button("Shuffle deck", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.id }), true);
+  const cut = button("Cut deck", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true);
+  const updateCount = (): void => {
+    const valid = Number.isInteger(Number(count.value)) && Number(count.value) >= 1 && Number(count.value) <= 100;
+    drawNTop.disabled = !valid; drawNBottom.disabled = !valid;
+  };
+  count.addEventListener("input", updateCount); updateCount();
+  panel.append(drawTop, drawBottom, drawNTop, drawNBottom, shuffle, cut);
+  return panel;
+}
+
 function renderTable(state: State): void {
   if (!workspace) return;
   selectedCardIds.clear(); selectionMode = false;
@@ -381,13 +426,11 @@ function renderTable(state: State): void {
     groupAction("Send selection to back", "reorder_cards", { direction: "back" });
     controls.append(selectionTools);
   }
-  const deck = state.containers.decks[0];
-  if (deck?.id && currentCan("deck.manage")) {
-    controls.append(button("Draw top", () => void action(state.session.id, "draw_top", { deck_id: deck.id })));
-    controls.append(button("Shuffle", () => void action(state.session.id, "shuffle_deck", { deck_id: deck.id }), true));
-    controls.append(button("Cut", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true));
+  if (state.containers.decks.length > 0 && currentCan("deck.manage")) {
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
-    if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
+    for (const deck of state.containers.decks) {
+      if (recipients.length > 1) controls.append(button(`Deal one each from ${deck.label || "deck"}`, () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
+    }
   }
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
     const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
@@ -398,6 +441,7 @@ function renderTable(state: State): void {
   if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
   for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
   workspace.append(controls);
+  for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
   workspace.append(renderRecentActions(state));
   renderBoard(state);
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);

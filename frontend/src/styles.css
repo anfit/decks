@@ -36,6 +36,8 @@ fieldset legend { padding: 0 .25rem; font-weight: 700; }
 .deck-selections { display: grid; gap: .6rem; }
 .deck-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: end; }
 .deck-selection button { min-height: 2.75rem; }
+.deck-controls { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); align-items: end; }
+.deck-controls h3 { grid-column: 1 / -1; margin: 0; }
 input, textarea, select { width: 100%; border: 1px solid #9aa8b3; border-radius: .35rem; padding: .65rem; font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #f2c14e; outline-offset: 2px; }
 label { display: grid; gap: .35rem; font-size: .9rem; }

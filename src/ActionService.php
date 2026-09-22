@@ -100,6 +100,17 @@ final class ActionService
             $id = $type === 'deck' ? (string) $container['deck_id'] : (string) $container['pile_id'];
             $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
         }
+        $decks = $database->prepare(
+            "SELECT d.id, d.label, count(c.id) AS card_count
+             FROM session_decks d
+             LEFT JOIN session_cards c ON c.session_id = d.session_id AND c.location_type = 'deck' AND c.deck_id = d.id
+             WHERE d.session_id = :session
+             GROUP BY d.id, d.label
+             ORDER BY d.created_at, d.id",
+        );
+        $decks->execute(['session' => $sessionId]);
+        $containerProjection['decks'] = [];
+        foreach ($decks as $deck) $containerProjection['decks'][] = ['id' => (string) $deck['id'], 'label' => $deck['label'] !== null ? (string) $deck['label'] : null, 'card_count' => (int) $deck['card_count']];
         $pileMeta = $database->prepare('SELECT id, label, x, y, rotation, z_index, locked_by, version FROM session_piles WHERE session_id = :session ORDER BY z_index, id');
         $pileMeta->execute(['session' => $sessionId]);
         $pileById = [];
