@@ -155,6 +155,71 @@ function currentCan(capability: Capability): boolean {
   return participant ? effectiveCapability(participant, capability) : false;
 }
 
+function renderPileControls(state: State, pile: Pile): HTMLElement {
+  const controls = document.createElement("div"); controls.className = "pile-controls";
+  const title = document.createElement("span"); title.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; controls.append(title);
+  const canManage = !pile.locked && currentCan("pile.manage");
+  if (canManage) {
+    controls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    controls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    controls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+  }
+  if (!pile.locked && currentCan("lock.manage")) controls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+  if (pile.locked && currentCan("lock.manage")) controls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+
+  const advanced = document.createElement("details"); advanced.className = "pile-advanced";
+  const summary = document.createElement("summary"); summary.textContent = "More pile actions"; advanced.append(summary);
+  const actions = document.createElement("div"); actions.className = "pile-advanced-actions"; advanced.append(actions);
+  if (canManage) {
+    const labelInput = document.createElement("input"); labelInput.type = "text"; labelInput.maxLength = 160; labelInput.value = pile.label ?? "";
+    actions.append(labelled("Pile label", labelInput));
+    actions.append(button("Save pile label", () => void action(state.session.id, "label_pile", { pile_id: pile.id, label: labelInput.value, expected_pile_version: pile.version }), true));
+
+    const splitCount = document.createElement("input"); splitCount.type = "number"; splitCount.min = "1"; splitCount.max = "100"; splitCount.value = "1"; splitCount.disabled = pile.card_count < 2;
+    actions.append(labelled("Cards to split from top", splitCount));
+    const splitLabel = document.createElement("input"); splitLabel.type = "text"; splitLabel.maxLength = 160; splitLabel.placeholder = "New pile label (optional)";
+    actions.append(labelled("New pile label", splitLabel));
+    const splitButton = button("Split top into new pile", () => {
+      const count = Number(splitCount.value);
+      if (!Number.isInteger(count) || count < 1 || count >= pile.card_count) return;
+      void action(state.session.id, "split_pile", { pile_id: pile.id, count, label: splitLabel.value.trim() || null, x: pile.x + 24, y: pile.y + 24, rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
+    }, true);
+    splitButton.disabled = pile.card_count < 2;
+    splitCount.addEventListener("input", () => { const count = Number(splitCount.value); splitButton.disabled = pile.card_count < 2 || !Number.isInteger(count) || count < 1 || count >= pile.card_count; });
+    actions.append(splitButton);
+
+    if (currentCan("card.manage")) {
+      const collect = button("Collect selected cards into this pile", () => applySelectedAction("collect_spread", { pile_id: pile.id, expected_pile_version: pile.version }), true);
+      collect.disabled = selectedCardIds.size === 0;
+      selectionActionButtons.push(collect);
+      actions.append(collect);
+    }
+
+    const targets = state.containers.piles.filter((candidate) => candidate.id !== pile.id && !candidate.locked);
+    if (targets.length > 0) {
+      const target = document.createElement("select"); target.setAttribute("aria-label", "Merge into pile");
+      for (const candidate of targets) {
+        const option = document.createElement("option"); option.value = candidate.id; option.textContent = `${candidate.label || "Pile"} · ${candidate.card_count} cards`; target.append(option);
+      }
+      actions.append(labelled("Merge into", target));
+      const mergeAt = (position: "top" | "bottom"): void => {
+        const destination = targets.find((candidate) => candidate.id === target.value);
+        if (!destination) return;
+        void action(state.session.id, "merge_piles", { source_pile_id: pile.id, target_pile_id: destination.id, position, expected_source_version: pile.version, expected_target_version: destination.version });
+      };
+      actions.append(button("Merge at top", () => mergeAt("top"), true), button("Merge at bottom", () => mergeAt("bottom"), true));
+    } else {
+      const hint = document.createElement("p"); hint.className = "muted";
+      hint.textContent = state.containers.piles.some((candidate) => candidate.id !== pile.id) ? "Unlock another pile to use it as a merge target." : "Create another pile to merge this one.";
+      actions.append(hint);
+    }
+  } else {
+    const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = pile.locked ? "Unlock this pile before changing its contents." : "Pile actions are not available for your current permissions."; actions.append(hint);
+  }
+  controls.append(advanced);
+  return controls;
+}
+
 function updateSelectionUi(): void {
   if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
   for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0;
@@ -258,18 +323,7 @@ function renderTable(state: State): void {
     }
   }
   if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
-  for (const pile of state.containers.piles) {
-    const pileControls = document.createElement("div"); pileControls.className = "pile-controls";
-    const pileLabel = document.createElement("span"); pileLabel.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; pileControls.append(pileLabel);
-    if (!pile.locked && currentCan("pile.manage")) {
-      pileControls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-      pileControls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-      pileControls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-    }
-    if (!pile.locked && currentCan("lock.manage")) pileControls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-    if (pile.locked && currentCan("lock.manage")) pileControls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-    controls.append(pileControls);
-  }
+  for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
   workspace.append(controls);
   renderBoard(state);
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);

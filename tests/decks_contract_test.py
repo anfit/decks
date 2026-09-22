@@ -99,6 +99,11 @@ class DecksContractTest(unittest.TestCase):
         pile = read_text("src/PileService.php")
         for method in ("public static function draw", "public static function split", "public static function merge", "public static function collectSpread", "public static function updateGeometry", "public static function label", "public static function lock"):
             self.assertIn(method, pile)
+        frontend = read_text("frontend/src/main.ts")
+        for label in ("More pile actions", "Split top into new pile", "Merge at top", "Merge at bottom", "Collect selected cards into this pile", "Save pile label"):
+            self.assertIn(label, frontend)
+        self.assertIn("expected_target_version: destination.version", frontend)
+        self.assertIn("candidate.id !== pile.id && !candidate.locked", frontend)
 
     def test_restore_and_collect_modes_are_explicit_and_server_authoritative(self) -> None:
         card = read_text("src/CardService.php")
