@@ -333,6 +333,9 @@ if (str_starts_with($path, '/api/')) {
         if ($path === '/api/mats-and-presets' && $method === 'GET') {
             json_response(MatPresetService::listOwned($database, $user));
         }
+        if ($path === '/api/templates' && $method === 'GET') {
+            json_response(TemplateService::listOwned($database, $user));
+        }
         if ($path === '/api/presets' && $method === 'POST') {
             $body = json_body();
             json_response(['preset' => MatPresetService::createPreset($database, $user, (string) ($body['name'] ?? ''), (string) ($body['template_version_id'] ?? ''), isset($body['mat_version_id']) ? (string) $body['mat_version_id'] : null, is_array($body['configuration'] ?? null) ? $body['configuration'] : [])], 201);
@@ -349,6 +352,9 @@ if (str_starts_with($path, '/api/')) {
             $body = json_body();
             $created = SessionService::create($database, $user, isset($body['title']) ? (string) $body['title'] : null, isset($body['max_participants']) ? (int) $body['max_participants'] : 12);
             json_response(['session' => $created], 201);
+        }
+        if ($path === '/api/sessions' && $method === 'GET') {
+            json_response(SessionService::listOwned($database, $user));
         }
         if ($path === '/api/sessions/join' && $method === 'POST') {
             $body = json_body();

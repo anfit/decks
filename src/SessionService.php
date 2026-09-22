@@ -39,6 +39,28 @@ final class SessionService
         }
     }
 
+    /** List resumable memberships without exposing join credentials or private state. */
+    public static function listOwned(PDO $database, array $user): array
+    {
+        $statement = $database->prepare(
+            'SELECT s.id, s.title, s.status, s.revision, s.created_at, s.last_activity_at, p.role
+             FROM sessions s
+             JOIN session_participants p ON p.session_id = s.id
+             WHERE p.user_id = :user AND p.removed_at IS NULL
+             ORDER BY s.last_activity_at DESC, s.id',
+        );
+        $statement->execute(['user' => $user['id']]);
+        return ['sessions' => array_map(static fn (array $row): array => [
+            'id' => (string) $row['id'],
+            'title' => $row['title'] !== null ? (string) $row['title'] : null,
+            'status' => (string) $row['status'],
+            'revision' => (int) $row['revision'],
+            'role' => (string) $row['role'],
+            'created_at' => (string) $row['created_at'],
+            'last_activity_at' => (string) $row['last_activity_at'],
+        ], $statement->fetchAll())];
+    }
+
     public static function join(PDO $database, array $user, string $tokenValue, string $role = 'player', ?string $expectedSessionId = null): array
     {
         if (!in_array($role, ['player', 'spectator'], true)) throw new RuntimeException('Invalid table role.');

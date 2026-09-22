@@ -2,6 +2,9 @@ import "./styles.css";
 
 type User = { id: string; email: string; role: string };
 type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
+type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
+type TemplateVersion = { id: string; version: number; definition_count: number };
+type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
 type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Array<{ id: string; card_count: number }> }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 
@@ -35,31 +38,87 @@ function button(label: string, onClick: () => void, secondary = false): HTMLButt
   item.addEventListener("click", onClick); return item;
 }
 
+function labelled(labelText: string, control: HTMLElement): HTMLLabelElement {
+  const label = document.createElement("label"); label.textContent = labelText; label.append(control); return label;
+}
+
 function renderHome(user: User): void {
   if (!workspace) return;
+  currentState = null; socket?.close(); socket = null;
   workspace.replaceChildren();
   const greeting = document.createElement("p"); greeting.textContent = `Signed in as ${user.email}`; workspace.append(greeting);
   const create = document.createElement("section"); create.className = "panel";
-  const title = document.createElement("input"); title.placeholder = "Table name (optional)";
+  const createHeading = document.createElement("h2"); createHeading.textContent = "Create a table"; create.append(createHeading);
+  const title = document.createElement("input"); title.placeholder = "Table name (optional)"; title.autocomplete = "off";
+  const maxParticipants = document.createElement("input"); maxParticipants.type = "number"; maxParticipants.min = "1"; maxParticipants.max = "100"; maxParticipants.value = "12";
+  const preset = document.createElement("select"); preset.name = "preset"; preset.innerHTML = '<option value="">No preset</option>';
+  const template = document.createElement("select"); template.name = "template"; template.innerHTML = '<option value="">No standalone deck</option>';
   const createButton = button("Create table", async () => {
-    try { const result = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: title.value || null }) }); showJoinResult(result.session); }
+    try {
+      const result = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: title.value.trim() || null, max_participants: Number(maxParticipants.value) || 12 }) });
+      let revision = Number(result.session.revision ?? 0);
+      const selectedPreset = preset.value ? (preset.selectedOptions[0]?.dataset.templateVersion ? { id: preset.value, template_version_id: preset.selectedOptions[0].dataset.templateVersion } : null) : null;
+      const selectedTemplateVersion = template.value || null;
+      if (selectedPreset) {
+        const configured = await sessionAction(result.session.id, revision, "configure_table", { preset_id: selectedPreset.id }); revision = Number(configured.revision);
+        const instantiated = await sessionAction(result.session.id, revision, "instantiate_deck", { template_version_id: selectedPreset.template_version_id, label: "Preset deck" }); revision = Number(instantiated.revision);
+      } else if (selectedTemplateVersion) {
+        await sessionAction(result.session.id, revision, "instantiate_deck", { template_version_id: selectedTemplateVersion, label: "Deck" });
+      }
+      showJoinResult(result.session);
+    }
     catch (error) { setStatus((error as Error).message, "error"); }
   });
-  create.append(title, createButton); workspace.append(create);
+  create.append(labelled("Table name", title), labelled("Maximum participants", maxParticipants), labelled("Preset", preset), labelled("Deck template version", template), createButton); workspace.append(create);
   const join = document.createElement("section"); join.className = "panel";
+  const joinHeading = document.createElement("h2"); joinHeading.textContent = "Join a table"; join.append(joinHeading);
   const token = document.createElement("input"); token.placeholder = "Paste table join token"; token.autocomplete = "off";
+  const role = document.createElement("select"); role.name = "role"; role.innerHTML = '<option value="player">Player</option><option value="spectator">Spectator</option>';
   const joinButton = button("Join table", async () => {
     try {
       const value = token.value.trim(); if (!value) throw new Error("Paste the complete table token.");
-      const result = await api("/api/sessions/join", { method: "POST", body: JSON.stringify({ token: value, role: "player" }) });
+      const result = await api("/api/sessions/join", { method: "POST", body: JSON.stringify({ token: value, role: role.value }) });
       const sessionId = result.membership?.session_id;
       if (typeof sessionId !== "string" || !sessionId) throw new Error("The table invitation did not return a session.");
       await openTable(sessionId);
     } catch (error) { setStatus((error as Error).message, "error"); }
   });
-  join.append(token, joinButton); workspace.append(join);
+  join.append(labelled("Table token", token), labelled("Role", role), joinButton); workspace.append(join);
   const invite = document.createElement("a"); invite.href = "/account/invite"; invite.textContent = "Invite someone to Decks"; workspace.append(invite);
+  void loadHomeData(preset, template);
   setStatus("Ready", "ok");
+}
+
+async function sessionAction(sessionId: string, revision: number, type: string, payload: Record<string, unknown>): Promise<any> {
+  return api(`/api/sessions/${sessionId}/actions`, { method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), type, payload, expected_session_revision: revision }) });
+}
+
+async function loadHomeData(preset: HTMLSelectElement, template: HTMLSelectElement): Promise<void> {
+  try {
+    const [sessions, presets, templates] = await Promise.all([api("/api/sessions"), api("/api/mats-and-presets"), api("/api/templates")]);
+    if (currentState !== null || !workspace) return;
+    for (const item of (presets.presets as Preset[] ?? [])) {
+      const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; option.dataset.templateVersion = item.template_version_id; preset.append(option);
+    }
+    for (const item of (templates.templates as Template[] ?? [])) {
+      for (const version of item.versions ?? []) {
+        if (version.definition_count < 1) continue;
+        const option = document.createElement("option"); option.value = version.id; option.textContent = `${item.name} · v${version.version} · ${version.definition_count} definitions`; template.append(option);
+      }
+    }
+    const section = document.createElement("section"); section.className = "panel";
+    const heading = document.createElement("h2"); heading.textContent = "Your tables"; section.append(heading);
+    const rows = sessions.sessions as Array<{ id: string; title: string | null; status: string; revision: number; role: string }> ?? [];
+    if (rows.length === 0) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "No active tables yet."; section.append(empty); }
+    for (const row of rows) {
+      const item = document.createElement("div"); item.className = "session-row";
+      const text = document.createElement("span"); text.textContent = `${row.title || "Untitled table"} · ${row.status} · revision ${row.revision} · ${row.role}`;
+      item.append(text, button("Open", () => void openTable(row.id), true)); section.append(item);
+    }
+    workspace.append(section);
+  } catch (error) {
+    setStatus(`Setup unavailable: ${(error as Error).message}`, "error");
+  }
 }
 
 function showJoinResult(session: { id: string; join_token: string }): void {

@@ -61,4 +61,34 @@ final class TemplateService
             throw $error;
         }
     }
+
+    /** Return only the caller's immutable templates and versions for session setup. */
+    public static function listOwned(PDO $database, array $user): array
+    {
+        $templates = $database->prepare('SELECT id, name, created_at FROM deck_templates WHERE owner_user_id = :owner ORDER BY created_at DESC, id');
+        $templates->execute(['owner' => $user['id']]);
+        $versions = $database->prepare(
+            'SELECT v.id, v.template_id, v.version, v.created_at, count(d.id) AS definition_count
+             FROM deck_template_versions v
+             JOIN deck_templates t ON t.id = v.template_id AND t.owner_user_id = :owner
+             LEFT JOIN card_definitions d ON d.template_version_id = v.id
+             GROUP BY v.id, v.template_id, v.version, v.created_at
+             ORDER BY v.template_id, v.version DESC, v.id',
+        );
+        $versions->execute(['owner' => $user['id']]);
+        $byTemplate = [];
+        foreach ($versions as $version) {
+            $templateId = (string) $version['template_id'];
+            $byTemplate[$templateId][] = [
+                'id' => (string) $version['id'],
+                'version' => (int) $version['version'],
+                'definition_count' => (int) $version['definition_count'],
+                'created_at' => (string) $version['created_at'],
+            ];
+        }
+        return ['templates' => array_map(static function (array $template) use ($byTemplate): array {
+            $id = (string) $template['id'];
+            return ['id' => $id, 'name' => (string) $template['name'], 'created_at' => (string) $template['created_at'], 'versions' => $byTemplate[$id] ?? []];
+        }, $templates->fetchAll())];
+    }
 }

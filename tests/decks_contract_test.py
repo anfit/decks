@@ -73,6 +73,19 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("$path === '/api/sessions/join'", routes)
         self.assertIn("The authenticated join surface accepts the opaque", read_text("spec/04-actions.md"))
 
+    def test_session_setup_lists_owned_tables_and_catalogs(self) -> None:
+        routes = read_text("public/index.php")
+        self.assertIn("$path === '/api/sessions' && $method === 'GET'", routes)
+        self.assertIn("$path === '/api/templates' && $method === 'GET'", routes)
+        self.assertIn("SessionService::listOwned", routes)
+        self.assertIn("TemplateService::listOwned", routes)
+        frontend = read_text("frontend/src/main.ts")
+        for endpoint in ("api(\"/api/sessions\")", "api(\"/api/mats-and-presets\")", "api(\"/api/templates\")"):
+            self.assertIn(endpoint, frontend)
+        self.assertIn("sessionAction(result.session.id", frontend)
+        self.assertIn("Spectator", frontend)
+        self.assertIn("Your tables", frontend)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)
