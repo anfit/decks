@@ -344,7 +344,7 @@ function renderBoard(state: State): void {
   }
   const canManageCards = currentCan("card.manage");
   const canManagePiles = currentCan("pile.manage");
-  state.containers.piles.forEach((pile) => surface.append(renderPile(pile, canManagePiles)));
+  state.containers.piles.forEach((pile) => surface.append(renderPile(state, pile, canManagePiles)));
   cards.forEach((card, index) => surface.append(renderCard(card, index, false, canManageCards)));
   board.append(surface);
 
@@ -369,7 +369,7 @@ function renderBoard(state: State): void {
   workspace.append(board);
 }
 
-function renderPile(pile: Pile, interactive: boolean): HTMLElement {
+function renderPile(state: State, pile: Pile, interactive: boolean): HTMLElement {
   const item = document.createElement("article"); item.className = `table-pile${pile.locked ? " locked" : ""}`;
   item.setAttribute("role", "group");
   item.setAttribute("aria-label", `${pile.label || "Pile"}, ${pile.card_count} cards${pile.locked ? ", locked" : ""}`);
@@ -381,12 +381,24 @@ function renderPile(pile: Pile, interactive: boolean): HTMLElement {
   if (interactive && !pile.locked) {
     const controls = document.createElement("div"); controls.className = "table-pile-controls"; controls.setAttribute("role", "group"); controls.setAttribute("aria-label", `Move or rotate ${pile.label || "pile"}`);
     const moveBy = (dx: number, dy: number): void => void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: Math.max(0, pile.x + dx), y: Math.max(0, pile.y + dy), rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
+    const moveLayer = (direction: "front" | "back"): void => {
+      const otherLayers = [
+        ...state.containers.piles.filter((candidate) => candidate.id !== pile.id).map((candidate) => candidate.z_index),
+        ...state.cards.filter((card) => card.location_type === "table").map((card) => card.z_index),
+      ];
+      const currentEdge = otherLayers.reduce((edge, z) => direction === "front" ? Math.max(edge, z) : Math.min(edge, z), pile.z_index);
+      const zIndex = currentEdge + (direction === "front" ? 1 : -1);
+      if (zIndex < -1000000 || zIndex > 1000000) { setStatus("The pile cannot move farther in that layer direction.", "error"); return; }
+      void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: pile.x, y: pile.y, rotation: pile.rotation, z_index: zIndex, expected_pile_version: pile.version });
+    };
     controls.append(
       button("Move pile left", () => moveBy(-20, 0), true),
       button("Move pile right", () => moveBy(20, 0), true),
       button("Move pile up", () => moveBy(0, -20), true),
       button("Move pile down", () => moveBy(0, 20), true),
       button("Rotate pile 15°", () => void action(statefulSessionId(), "rotate_pile", { pile_id: pile.id, x: pile.x, y: pile.y, rotation: pile.rotation + 15, z_index: pile.z_index, expected_pile_version: pile.version }), true),
+      button("Bring pile to front", () => moveLayer("front"), true),
+      button("Send pile to back", () => moveLayer("back"), true),
     );
     item.append(controls);
     item.title = "Drag to move, or use the labeled move and rotate buttons.";

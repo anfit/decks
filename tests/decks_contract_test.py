@@ -104,8 +104,8 @@ class DecksContractTest(unittest.TestCase):
             self.assertIn(label, frontend)
         self.assertIn("expected_target_version: destination.version", frontend)
         self.assertIn("candidate.id !== pile.id && !candidate.locked", frontend)
-        self.assertIn("function renderPile(pile: Pile, interactive: boolean)", frontend)
-        for label in ("Move pile left", "Move pile right", "Move pile up", "Move pile down", "Rotate pile 15°"):
+        self.assertIn("function renderPile(state: State, pile: Pile, interactive: boolean)", frontend)
+        for label in ("Move pile left", "Move pile right", "Move pile up", "Move pile down", "Rotate pile 15°", "Bring pile to front", "Send pile to back"):
             self.assertIn(label, frontend)
         self.assertIn('"move_pile"', frontend)
         self.assertIn('"rotate_pile"', frontend)
