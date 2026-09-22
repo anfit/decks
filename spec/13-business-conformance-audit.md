@@ -85,3 +85,7 @@ Live browser acceptance now confirms the operator can submit the production sign
 7. Keep the authorized SMTP delivery, DKIM/DMARC and encrypted off-host backup ownership/retention gates open until the relevant external evidence exists.
 
 The audit remains **partial**: source conformance is strong for core state, visibility, randomness and atomicity, but the revision-1 MVP and current production release are not yet fully conformant or accepted.
+
+## Realtime finding response — 2026-09-22
+
+The browser finding was traced to the frontend replacing its socket from `renderTable()` after every snapshot refresh; closing the old socket could schedule a reconnect that displaced the new one. The contract in `spec/05-sync.md` now defines one session-scoped connection, generation-guarded callbacks and a single cancellable retry. Commit `a0abcb8` implements that lifecycle, reports Connected only on WebSocket `open`, and adds a regression contract test. Validation passes 24/24 Python contract tests, TypeScript typecheck, Vite production build and `git diff --check`. This is a source-level correction only: production still runs `4e51b2d`, so the live reconnect observation remains open until the corrected release is deployed and browser-verified.

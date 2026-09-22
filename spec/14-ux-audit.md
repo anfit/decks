@@ -76,3 +76,7 @@ The live production source is older than the audited repository: all three OVH s
 5. Exercise keyboard and touch on narrow viewports, player/spectator privacy, denied capabilities, stale mutations and reconnect on the deployed release.
 
 The authenticated pass verified login and one reversible keyboard card action only. It did not create new production sessions or send mail. No claim is made that the full current source has passed browser acceptance.
+
+## Realtime finding response — 2026-09-22
+
+The repeated reconnect state led to a source fix in commit `a0abcb8` (S08; `spec/05-sync.md`): ordinary rerenders no longer replace the socket; session changes invalidate old callbacks and retry timers; the UI marks Connected only after the active WebSocket opens. The regression contract is included in the 24/24 passing Python suite; TypeScript typecheck, Vite build and diff check pass. The production browser still runs the old release, so the result is not yet accepted in production. Re-run the mutation/reconnect and two-client checks after deployment.
