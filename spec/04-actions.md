@@ -20,6 +20,8 @@ The host may transfer host role, remove/restore participants, freeze/unfreeze co
 
 ## Durable action envelope
 
+`reorder_hand` accepts a complete ordering of the actor's own hand and rejects any foreign, missing, duplicated or removed card. The owner-only hand projection includes local card order so the client can render and submit the same order. `give_cards` transfers selected cards only from the actor's own hand to an active host/player hand; the request must include an exact expected-version entry for every selected card. The transfer is atomic, private to the recipient, and its public event contains only a generic action type and safe count: it omits recipient/participant IDs, card IDs and card identities.
+
 Every state mutation uses `POST /api/sessions/{sessionId}/actions`:
 
 ```json

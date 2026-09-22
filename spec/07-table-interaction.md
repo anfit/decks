@@ -2,6 +2,8 @@
 
 Status: initial contract, 2026-09-21.
 
+The owner-only hand tray renders cards in the server-provided private hand order, with accessible earlier/later controls that submit the complete hand order as `reorder_hand`. A player can select cards from only their own hand, choose an active host/player recipient, and either give the selection privately or return it to its source decks top/bottom. Give and return requests carry exact expected versions for every selected card. The recipient control uses safe generic participant labels and counts; it never displays account email or raw participant IDs. The hand order and card identities are excluded from every other participant's projection and public event.
+
 The first client uses ordinary DOM elements inside a transformable table. Pointer Events drive local drag previews; pointer release submits one durable action. Every essential drag operation has an action-menu alternative. Pan/zoom, selection, rotation, z-order, keyboard focus, touch-sized controls and reduced motion are presentation concerns; final position and containment are server state.
 
 Create-table responses display an opaque join token for authenticated players. The Join table control submits that token unchanged to the token-only join endpoint; it never assumes the token is encoded JSON or decodes its segments in the browser.

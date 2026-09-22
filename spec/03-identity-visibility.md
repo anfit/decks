@@ -16,9 +16,11 @@ Global administration never implies table membership or private-hand visibility.
 
 ## Card visibility
 
-Card identity, location and face state are separate. Public face-up cards expose an authorized front projection. Public face-down and private cards expose only the minimum interaction handle, back asset and spatial/container information permitted to the viewer. A hand owner sees its identities; other participants receive counts unless an explicit reveal occurs. A table card entering an `owner_private` zone is owned by the placing actor and exposes its definition only to that actor. The host does not see hands or another participant’s private table cards by default.
+Card identity, location and face state are separate. Public face-up cards expose an authorized front projection. Public face-down and private cards expose only the minimum interaction handle, back asset and spatial/container information permitted to the viewer. A hand owner sees its identities; other participants receive counts unless an explicit reveal occurs. A table card entering an `owner_private` zone is owned by the placing actor and exposes its definition only to that actor. The host does not see hands or another participantâ€™s private table cards by default.
 
 Projection code is allowlist-based and shared by snapshots, changes, action results, WebSocket notifications and history. It must not send hidden definition IDs, front URLs, private metadata, hidden order, peek results or raw historical secrets. Protected front assets are authorized per request and delivered through Nginx internal handoff; frontend CSS/DOM hiding is not a security boundary.
+
+Hand order is private card state: the snapshot may expose it only in the current owner's own-hand projection and must omit it from all public or other-participant views and events.
 
 ## Session/table revocation
 
