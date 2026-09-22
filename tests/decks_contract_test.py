@@ -64,6 +64,15 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("pointerdown", source)
         self.assertIn("expected_card_version", source)
 
+    def test_frontend_joins_opaque_tokens_without_browser_decoding(self) -> None:
+        source = read_text("frontend/src/main.ts")
+        self.assertIn('api("/api/sessions/join"', source)
+        self.assertIn("result.membership?.session_id", source)
+        self.assertNotIn("atob(", source)
+        routes = read_text("public/index.php")
+        self.assertIn("$path === '/api/sessions/join'", routes)
+        self.assertIn("The authenticated join surface accepts the opaque", read_text("spec/04-actions.md"))
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)

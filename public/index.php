@@ -350,6 +350,11 @@ if (str_starts_with($path, '/api/')) {
             $created = SessionService::create($database, $user, isset($body['title']) ? (string) $body['title'] : null, isset($body['max_participants']) ? (int) $body['max_participants'] : 12);
             json_response(['session' => $created], 201);
         }
+        if ($path === '/api/sessions/join' && $method === 'POST') {
+            $body = json_body();
+            $joined = SessionService::join($database, $user, (string) ($body['token'] ?? ''), (string) ($body['role'] ?? 'player'));
+            json_response(['membership' => $joined], 201);
+        }
         if (preg_match('#^/api/sessions/([0-9a-fA-F-]{36})/join$#', $path, $matches) && $method === 'POST') {
             $body = json_body();
             $joined = SessionService::join($database, $user, (string) ($body['token'] ?? ''), (string) ($body['role'] ?? 'player'), $matches[1]);

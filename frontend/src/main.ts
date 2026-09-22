@@ -50,10 +50,11 @@ function renderHome(user: User): void {
   const token = document.createElement("input"); token.placeholder = "Paste table join token"; token.autocomplete = "off";
   const joinButton = button("Join table", async () => {
     try {
-      const parts = token.value.split("."); if (parts.length !== 2 || !parts[0]) throw new Error("Paste the complete table token.");
-      const payload = JSON.parse(atob(parts[0].replaceAll("-", "+").replaceAll("_", "/") + "=="));
-      await api(`/api/sessions/${payload.session_id}/join`, { method: "POST", body: JSON.stringify({ token: token.value, role: "player" }) });
-      await openTable(payload.session_id);
+      const value = token.value.trim(); if (!value) throw new Error("Paste the complete table token.");
+      const result = await api("/api/sessions/join", { method: "POST", body: JSON.stringify({ token: value, role: "player" }) });
+      const sessionId = result.membership?.session_id;
+      if (typeof sessionId !== "string" || !sessionId) throw new Error("The table invitation did not return a session.");
+      await openTable(sessionId);
     } catch (error) { setStatus((error as Error).message, "error"); }
   });
   join.append(token, joinButton); workspace.append(join);
