@@ -14,6 +14,8 @@ Deal accepts `mode: round_robin` (one card per recipient per round) or `mode: pe
 
 Host `restore_card` accepts an explicit source-deck position (`top`, `bottom` or `shuffle`), and `collect_all` accepts `original`, `shuffle` or `preserve` mode. The server remains authoritative for ordering and randomization.
 
+Action authorization also applies the participant capability policy in `spec/19-capability-policy.md`; the host may update an allowlisted participant capability map through `set_participant_capabilities`.
+
 The host may transfer host role, remove/restore participants, freeze/unfreeze configuration and end/reset where capability permits. A global account administrator has no table access unless also a participant. Host disconnect does not elect a replacement automatically.
 
 ## Durable action envelope
