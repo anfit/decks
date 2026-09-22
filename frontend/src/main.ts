@@ -278,6 +278,7 @@ function renderTable(state: State): void {
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
   const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;
   const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${totalCardCount} cards`; workspace.append(meta);
+  const currentParticipant = state.participants.find((participant) => participant.is_current);
   if (state.zones.length) { const zones = document.createElement("p"); zones.className = "muted"; zones.textContent = `Zones: ${state.zones.map((zone) => zone.name).join(", ")}`; workspace.append(zones); }
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
@@ -285,6 +286,12 @@ function renderTable(state: State): void {
   const capabilityPanel = renderCapabilityControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
+  if (currentParticipant?.role === "host" && currentCan("session.manage")) {
+    if (state.session.status === "lobby") controls.append(button("Start session", () => void action(state.session.id, "start_session", {})));
+    if (state.session.status === "active") controls.append(button("End session", () => {
+      if (window.confirm("End this session for everyone? Participants will no longer be able to change the table.")) void action(state.session.id, "end_session", {});
+    }, true));
+  }
   if (currentCan("card.manage")) {
     const selectCards = button("Select cards", () => {
       selectionMode = !selectionMode;
@@ -315,12 +322,12 @@ function renderTable(state: State): void {
     controls.append(button("Cut", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true));
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
     if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
-    if (currentCan("session.manage")) {
-      const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
-      controls.append(labelled("Collect mode", collectMode));
-      controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
-      controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
-    }
+  }
+  if (currentParticipant?.role === "host" && currentCan("session.manage")) {
+    const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
+    controls.append(labelled("Collect mode", collectMode));
+    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
+    controls.append(button("Reset table", () => { if (window.confirm("Reset the table to the lobby and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
   }
   if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
   for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));

@@ -86,6 +86,16 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Spectator", frontend)
         self.assertIn("Your tables", frontend)
 
+    def test_host_lifecycle_and_recovery_controls_are_role_and_capability_scoped(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        self.assertIn('currentParticipant?.role === "host" && currentCan("session.manage")', frontend)
+        self.assertIn('button("Start session"', frontend)
+        self.assertIn('button("End session"', frontend)
+        self.assertIn('button("Collect all"', frontend)
+        self.assertIn('button("Reset table"', frontend)
+        self.assertIn("End this session for everyone?", frontend)
+        self.assertIn("Reset the table to the lobby and collect every card?", frontend)
+
     def test_deal_modes_have_distinct_round_robin_and_participant_major_order(self) -> None:
         source = read_text("src/CardService.php")
         self.assertIn("if ($mode === 'per_participant')", source)
