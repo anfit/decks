@@ -104,6 +104,11 @@ class DecksContractTest(unittest.TestCase):
             self.assertIn(label, frontend)
         self.assertIn("expected_target_version: destination.version", frontend)
         self.assertIn("candidate.id !== pile.id && !candidate.locked", frontend)
+        self.assertIn("function renderPile(pile: Pile, interactive: boolean)", frontend)
+        for label in ("Move pile left", "Move pile right", "Move pile up", "Move pile down", "Rotate pile 15°"):
+            self.assertIn(label, frontend)
+        self.assertIn('"move_pile"', frontend)
+        self.assertIn('"rotate_pile"', frontend)
 
     def test_restore_and_collect_modes_are_explicit_and_server_authoritative(self) -> None:
         card = read_text("src/CardService.php")

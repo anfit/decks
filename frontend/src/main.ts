@@ -339,10 +339,12 @@ function renderBoard(state: State): void {
   const heading = document.createElement("h3"); heading.textContent = "Table"; board.append(heading);
   const surface = document.createElement("div"); surface.className = "table-surface";
   const cards = state.cards.filter((card) => card.location_type === "table");
-  if (cards.length === 0) {
+  if (cards.length === 0 && state.containers.piles.length === 0) {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; surface.append(empty);
   }
   const canManageCards = currentCan("card.manage");
+  const canManagePiles = currentCan("pile.manage");
+  state.containers.piles.forEach((pile) => surface.append(renderPile(pile, canManagePiles)));
   cards.forEach((card, index) => surface.append(renderCard(card, index, false, canManageCards)));
   board.append(surface);
 
@@ -365,6 +367,54 @@ function renderBoard(state: State): void {
   });
   hand.append(handRow); board.append(hand);
   workspace.append(board);
+}
+
+function renderPile(pile: Pile, interactive: boolean): HTMLElement {
+  const item = document.createElement("article"); item.className = `table-pile${pile.locked ? " locked" : ""}`;
+  item.setAttribute("role", "group");
+  item.setAttribute("aria-label", `${pile.label || "Pile"}, ${pile.card_count} cards${pile.locked ? ", locked" : ""}`);
+  item.style.left = `${Math.max(0, pile.x)}px`; item.style.top = `${Math.max(0, pile.y)}px`; item.style.zIndex = String(pile.z_index);
+  const stack = document.createElement("div"); stack.className = "table-pile-stack"; stack.style.transform = `rotate(${pile.rotation || 0}deg)`;
+  const label = document.createElement("strong"); label.textContent = pile.label || "Pile";
+  const count = document.createElement("span"); count.textContent = `${pile.card_count} cards`;
+  stack.append(label, count); item.append(stack);
+  if (interactive && !pile.locked) {
+    const controls = document.createElement("div"); controls.className = "table-pile-controls"; controls.setAttribute("role", "group"); controls.setAttribute("aria-label", `Move or rotate ${pile.label || "pile"}`);
+    const moveBy = (dx: number, dy: number): void => void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: Math.max(0, pile.x + dx), y: Math.max(0, pile.y + dy), rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
+    controls.append(
+      button("Move pile left", () => moveBy(-20, 0), true),
+      button("Move pile right", () => moveBy(20, 0), true),
+      button("Move pile up", () => moveBy(0, -20), true),
+      button("Move pile down", () => moveBy(0, 20), true),
+      button("Rotate pile 15°", () => void action(statefulSessionId(), "rotate_pile", { pile_id: pile.id, x: pile.x, y: pile.y, rotation: pile.rotation + 15, z_index: pile.z_index, expected_pile_version: pile.version }), true),
+    );
+    item.append(controls);
+    item.title = "Drag to move, or use the labeled move and rotate buttons.";
+    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;
+    item.addEventListener("pointerdown", (event) => {
+      if (selectionMode || (event.target instanceof Element && event.target.closest("button"))) return;
+      item.setPointerCapture(event.pointerId);
+      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: pile.x, startY: pile.y, moved: false };
+      item.classList.add("dragging");
+    });
+    item.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
+      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
+      if (Math.abs(nextX - drag.startX) + Math.abs(nextY - drag.startY) > 4) drag.moved = true;
+      item.style.left = `${nextX}px`; item.style.top = `${nextY}px`;
+    });
+    item.addEventListener("pointerup", (event) => {
+      if (!drag) return;
+      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
+      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
+      const moved = drag.moved; drag = null; item.classList.remove("dragging");
+      if (moved) void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: nextX, y: nextY, rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
+      else { item.style.left = `${Math.max(0, pile.x)}px`; item.style.top = `${Math.max(0, pile.y)}px`; }
+    });
+    item.addEventListener("pointercancel", () => { drag = null; item.classList.remove("dragging"); item.style.left = `${Math.max(0, pile.x)}px`; item.style.top = `${Math.max(0, pile.y)}px`; });
+  }
+  return item;
 }
 
 function surfaceSelectionMode(enabled: boolean): void {

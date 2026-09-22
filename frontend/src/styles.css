@@ -45,6 +45,13 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .table-view h3 { margin: .25rem 0; }
 .table-surface { position: relative; min-height: 20rem; overflow: auto; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }
 .table-empty { margin: 2rem; color: #dbece2; }
+.table-pile { position: absolute; display: grid; justify-items: center; gap: .35rem; width: 9rem; padding: .35rem; cursor: grab; touch-action: manipulation; user-select: none; }
+.table-pile.locked { cursor: default; }
+.table-pile.dragging { cursor: grabbing; opacity: .86; }
+.table-pile-stack { display: grid; place-items: center; gap: .3rem; width: 6rem; min-height: 7.2rem; padding: .4rem; border: 2px solid #d4dce2; border-radius: .45rem; background: repeating-linear-gradient(135deg, #315a80 0, #315a80 .25rem, #477ba8 .25rem, #477ba8 .5rem); color: #fff; box-shadow: 0 .35rem .5rem #10261b66; text-align: center; }
+.table-pile-stack strong { max-width: 100%; overflow-wrap: anywhere; font-size: .75rem; }
+.table-pile-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem; width: 100%; }
+.table-pile-controls button { padding: .3rem; font-size: .7rem; }
 .card { position: absolute; display: grid; place-items: center; width: 4.3rem; min-height: 6rem; padding: .35rem; border: 2px solid #d4dce2; border-radius: .45rem; background: #fff; color: #1e2933; box-shadow: 0 .35rem .5rem #10261b66; cursor: grab; touch-action: manipulation; user-select: none; text-align: center; }
 .table-surface.selection-mode .card { cursor: pointer; }
 .card.selected { outline: 4px solid #f2c14e; outline-offset: 3px; }
@@ -62,4 +69,4 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .pile-advanced { width: 100%; padding: .5rem; border: 1px solid #cbd5dc; border-radius: .45rem; background: #f8fafb; }
 .pile-advanced summary { cursor: pointer; font-weight: 600; }
 .pile-advanced-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .65rem; margin-top: .65rem; align-items: end; }
-@media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .table-surface { min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select { min-height: 2.75rem; } }
+@media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .table-surface { min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .table-pile { width: 8rem; } .table-pile-stack { width: 5.5rem; min-height: 6rem; } .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select, .table-pile-controls button { min-height: 2.75rem; } }
