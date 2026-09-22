@@ -20,7 +20,7 @@ class DecksContractTest(unittest.TestCase):
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")
-        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
+        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'return_to_source_decks'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
             self.assertIn(action, source)
 
     def test_mats_presets_and_private_zone_effects_are_authorized(self) -> None:
@@ -235,8 +235,36 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("foreach ($rows as $card) self::assertCanControl($card, $member);", pile)
         self.assertIn("count(array_unique(array_map('strval', $ids))) !== count($ids)", pile)
         self.assertIn("public static function collectSpread", pile)
-        self.assertIn("$requiredCapabilities[] = 'pile.manage'", action)
+        self.assertIn("self::requiredCapabilities($type, $payload)", action)
+        self.assertIn("if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $required[] = 'pile.manage'", action)
+        self.assertIn("'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage']", action)
+        self.assertIn("'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage']", action)
+        self.assertIn("'merge_pile_top', 'merge_pile_bottom' => ['deck.manage']", action)
+        self.assertIn("'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck'", action)
         self.assertIn("both `deck.manage` and `pile.manage`", capabilities)
+
+    def test_composite_actions_require_all_capabilities_before_replay_and_return_versions(self) -> None:
+        action = read_text("src/ActionService.php")
+        card = read_text("src/CardService.php")
+        spec = read_text("spec/19-capability-policy.md")
+        self.assertIn("self::requiredCapabilities($type, $payload)", action)
+        self.assertLess(action.index("self::requiredCapabilities($type, $payload)"), action.index("$duplicate = $database->prepare"))
+        self.assertIn("Expected card versions are required.", card)
+        self.assertIn("`return_top`, `return_bottom`, `return_to_source_decks`, `insert_cards`", spec)
+
+    def test_return_selection_resolves_source_decks_without_projecting_associations(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        spec = read_text("spec/07-table-interaction.md")
+        self.assertIn('"Return selection to source decks top"', frontend)
+        self.assertIn('"Return selection to source decks bottom"', frontend)
+        action = read_text("src/ActionService.php")
+        card = read_text("src/CardService.php")
+        self.assertIn("CardService::returnToSourceDecks", action)
+        self.assertIn("$groups[$sourceDeckId]['card_ids'][]", card)
+        self.assertNotIn("'source_deck_id' =>", action)
+        self.assertIn("Expected card versions are required.", card)
+        self.assertIn("return ['card_count' => count($ids), 'position' => $position]", card)
+        self.assertIn("exact expected card-version map", spec)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

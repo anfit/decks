@@ -26,11 +26,7 @@ final class ActionService
             if (!is_array($session)) throw new RuntimeException('Session not found.');
             $member = SessionService::membership($database, $sessionId, (string) $user['id']);
             if ($member === null) throw new RuntimeException('Active table membership required.');
-            $requiredCapabilities = [];
-            $capability = self::capabilityForAction($type);
-            if ($capability !== null) $requiredCapabilities[] = $capability;
-            if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $requiredCapabilities[] = 'pile.manage';
-            foreach (array_unique($requiredCapabilities) as $requiredCapability) {
+            foreach (self::requiredCapabilities($type, $payload) as $requiredCapability) {
                 if (!SessionService::hasCapability($member, $requiredCapability)) throw new RuntimeException('This participant is not allowed to perform that action.');
             }
             $duplicate = $database->prepare(
@@ -184,13 +180,29 @@ final class ActionService
             'start_session', 'end_session', 'reset_session', 'collect_all', 'configure_table', 'instantiate_deck' => 'session.manage',
             'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities' => 'participant.manage',
             'create_zone', 'delete_zone' => 'zone.manage',
-            'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
+            'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
             'move_card', 'move_cards', 'rotate_card', 'rotate_cards', 'set_cards_face', 'reorder_cards', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
             'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom' => 'pile.manage',
             'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile' => 'lock.manage',
             'undo_action' => 'card.undo',
             default => null,
         };
+    }
+
+    private static function requiredCapabilities(string $type, array $payload): array
+    {
+        $required = [];
+        $base = self::capabilityForAction($type);
+        if ($base !== null) $required[] = $base;
+        $additional = match ($type) {
+            'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage'],
+            'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage'],
+            'merge_pile_top', 'merge_pile_bottom' => ['deck.manage'],
+            default => [],
+        };
+        foreach ($additional as $capability) $required[] = $capability;
+        if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $required[] = 'pile.manage';
+        return array_values(array_unique($required));
     }
 
     private static function apply(PDO $database, array $session, array $member, array $user, string $type, array $payload): array
@@ -229,6 +241,7 @@ final class ActionService
             'move_to_hand' => CardService::moveToHand($database, $session, $member, $payload),
             'play_from_hand' => CardService::playFromHand($database, $session, $member, $payload),
             'return_top', 'return_bottom' => CardService::returnToDeck($database, $session, $member, $payload, $type === 'return_top' ? 'top' : 'bottom'),
+            'return_to_source_decks' => CardService::returnToSourceDecks($database, $session, $member, $payload),
             'create_pile' => PileService::create($database, $session, $member, $payload),
             'move_to_pile' => PileService::move($database, $session, $member, $payload),
             'draw_pile_top', 'draw_pile_bottom' => PileService::draw($database, $session, $member, $payload, $type === 'draw_pile_top' ? 'top' : 'bottom'),

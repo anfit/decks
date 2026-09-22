@@ -422,9 +422,13 @@ final class CardService
         self::deck($database, $session['id'], $deckId);
         $ids = $payload['card_ids'] ?? [];
         if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
+        $versions = $payload['expected_card_versions'] ?? null;
+        if (!is_array($versions) || count($versions) !== count($ids)) throw new RuntimeException('Expected card versions are required.');
         $moving = [];
         foreach ($ids as $id) {
+            if (!array_key_exists((string) $id, $versions) || filter_var($versions[(string) $id], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected card versions are required.');
             $card = self::card($database, $session['id'], (string) $id);
+            self::assertVersion($card, ['expected_card_version' => $versions[(string) $id]]);
             self::assertCanControl($card, $member);
             self::assertSourcePileUnlocked($database, (string) $session['id'], $card, $member);
             $moving[] = $card;
@@ -457,6 +461,41 @@ final class CardService
         }
         self::bumpDeck($database, $deckId);
         return ['deck_id' => $deckId, 'position' => $position, 'card_ids' => $movingIds];
+    }
+
+    public static function returnToSourceDecks(PDO $database, array $session, array $member, array $payload): array
+    {
+        self::assertPlayer($session, $member);
+        $position = (string) ($payload['position'] ?? '');
+        if (!in_array($position, ['top', 'bottom'], true)) throw new RuntimeException('Deck position is invalid.');
+        $ids = $payload['card_ids'] ?? [];
+        $versions = $payload['expected_card_versions'] ?? null;
+        if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
+        if (!is_array($versions) || count($versions) !== count($ids)) throw new RuntimeException('Expected card versions are required.');
+
+        $groups = [];
+        foreach ($ids as $rawId) {
+            $cardId = (string) $rawId;
+            if (!array_key_exists($cardId, $versions) || filter_var($versions[$cardId], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected card versions are required.');
+            $card = self::card($database, (string) $session['id'], $cardId);
+            self::assertVersion($card, ['expected_card_version' => $versions[$cardId]]);
+            self::assertCanControl($card, $member);
+            if ($card['location_type'] !== 'table') throw new RuntimeException('Only table cards may be returned to their source decks.');
+            $sourceDeckId = (string) $card['source_deck_id'];
+            if ($sourceDeckId === '') throw new RuntimeException('Card source deck is unavailable.');
+            $groups[$sourceDeckId]['card_ids'][] = $cardId;
+            $groups[$sourceDeckId]['versions'][$cardId] = $versions[$cardId];
+        }
+
+        ksort($groups, SORT_STRING);
+        foreach ($groups as $deckId => $group) {
+            self::returnToDeck($database, $session, $member, [
+                'deck_id' => $deckId,
+                'card_ids' => $group['card_ids'],
+                'expected_card_versions' => $group['versions'],
+            ], $position);
+        }
+        return ['card_count' => count($ids), 'position' => $position];
     }
 
     private static function assertPlayer(array $session, array $member): void

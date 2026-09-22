@@ -23,7 +23,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   transfer_host: "transferred the host role", remove_participant: "removed a participant", restore_participant: "restored a participant",
   set_participant_capabilities: "changed participant permissions", instantiate_deck: "added a deck", configure_table: "configured the table",
   draw_top: "drew a card from a deck", draw_bottom: "drew a card from a deck", draw_n: "drew cards from a deck", deal: "dealt cards",
-  return_top: "returned cards to a deck", return_bottom: "returned cards to a deck", shuffle_deck: "shuffled a deck", cut_deck: "cut a deck",
+  return_top: "returned cards to a deck", return_bottom: "returned cards to a deck", return_to_source_decks: "returned cards to their decks", shuffle_deck: "shuffled a deck", cut_deck: "cut a deck",
   insert_cards: "inserted cards into a deck", split_deck: "split a deck", move_card: "moved a card", move_cards: "moved cards",
   rotate_card: "rotated a card", rotate_cards: "rotated cards", flip_card: "flipped a card", turn_face_up: "turned a card face up",
   turn_face_down: "turned a card face down", set_cards_face: "changed card faces", reorder_cards: "changed card order",
@@ -226,13 +226,16 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
   const controls = document.createElement("div"); controls.className = "pile-controls";
   const title = document.createElement("span"); title.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; controls.append(title);
   const canManage = !pile.locked && currentCan("pile.manage");
+  const canChangePileCards = canManage && currentCan("card.manage");
   if (canManage) {
-    controls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-    controls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
     controls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
   }
-  if (!pile.locked && currentCan("lock.manage")) controls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
-  if (pile.locked && currentCan("lock.manage")) controls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+  if (canChangePileCards) {
+    controls.append(button("Draw pile top", () => void action(state.session.id, "draw_pile_top", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+    controls.append(button("Draw pile bottom", () => void action(state.session.id, "draw_pile_bottom", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+  }
+  if (!pile.locked && currentCan("lock.manage") && currentCan("pile.manage")) controls.append(button("Lock pile", () => void action(state.session.id, "lock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
+  if (pile.locked && currentCan("lock.manage") && currentCan("pile.manage")) controls.append(button("Unlock pile", () => void action(state.session.id, "unlock_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
 
   const advanced = document.createElement("details"); advanced.className = "pile-advanced";
   const summary = document.createElement("summary"); summary.textContent = "More pile actions"; advanced.append(summary);
@@ -255,7 +258,7 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
     splitCount.addEventListener("input", () => { const count = Number(splitCount.value); splitButton.disabled = pile.card_count < 2 || !Number.isInteger(count) || count < 1 || count >= pile.card_count; });
     actions.append(splitButton);
 
-    if (currentCan("card.manage")) {
+    if (canChangePileCards) {
       const collect = button("Collect selected cards into this pile", () => applySelectedAction("collect_spread", { pile_id: pile.id, expected_pile_version: pile.version }), true);
       collect.disabled = selectedCardIds.size === 0;
       selectionActionButtons.push(collect);
@@ -298,7 +301,11 @@ function updateSelectionUi(): void {
 }
 
 function selectionPayload(): { card_ids: string[]; expected_card_versions: Record<string, number> } {
-  const cards = currentState?.cards.filter((card) => selectedCardIds.has(card.id) && card.location_type === "table") ?? [];
+  const cards: Card[] = [];
+  for (const cardId of selectedCardIds) {
+    const card = currentState?.cards.find((item) => item.id === cardId && item.location_type === "table");
+    if (card) cards.push(card);
+  }
   return { card_ids: cards.map((card) => card.id), expected_card_versions: Object.fromEntries(cards.map((card) => [card.id, card.version])) };
 }
 
@@ -424,6 +431,10 @@ function renderTable(state: State): void {
     groupAction("Turn selected face down", "set_cards_face", { face_state: "down" });
     groupAction("Bring selection to front", "reorder_cards", { direction: "front" });
     groupAction("Send selection to back", "reorder_cards", { direction: "back" });
+    if (currentCan("deck.manage")) {
+      groupAction("Return selection to source decks top", "return_to_source_decks", { position: "top" });
+      groupAction("Return selection to source decks bottom", "return_to_source_decks", { position: "bottom" });
+    }
     controls.append(selectionTools);
   }
   if (state.containers.decks.length > 0 && currentCan("deck.manage")) {
