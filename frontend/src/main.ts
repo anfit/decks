@@ -153,7 +153,9 @@ function renderTable(state: State): void {
     controls.append(button("Cut", () => void action(state.session.id, "cut_deck", { deck_id: deck.id }), true));
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
     if (recipients.length > 1) controls.append(button("Deal one each", () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
-    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", {}), true));
+    const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
+    controls.append(labelled("Collect mode", collectMode));
+    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
     controls.append(button("Reset table", () => { if (window.confirm("Reset the table and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
   }
   controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
