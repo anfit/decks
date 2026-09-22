@@ -29,6 +29,7 @@ The product surface is materially behind the business MVP even where backend pri
 | Priority | Area | Evidence and required follow-up |
 | --- | --- | --- |
 | P0 | Primary web flow | The normal UI only creates or joins a blank table and exposes Refresh, Draw top, Shuffle, Cut, Deal one each, Collect all, and Reset. It cannot choose a template, deck, preset, access mode, participant permissions, or spectator role. Wire the intended setup and core actions into the UI. |
+| P0 | Join-token flow | A token produced by the create-table UI is a scoped random token (`hex.hex`), while the frontend currently appends `==` and calls `atob` on the first segment as if it were a base64 JSON payload. Joining the token from the same UI therefore fails before the request (`InvalidCharacterError`). Make token parsing match the API contract and add a browser regression test. |
 | P1 | Capability permissions | `session_participants.capabilities` is stored, but service checks and UI controls do not consistently enforce or configure capability-level permissions. Add an explicit policy matrix and host controls. |
 | P1 | Deal semantics | `per_participant` computes a mode but currently iterates round-robin, so participant-at-a-time behavior is not implemented. Correct the service and add a contract test. |
 | P1 | Pile operations | Missing explicit pile draw top/bottom, pile split/merge, collect-spread, pile spatial move/rotate/z-order, labels, and locks. Add actions, authorization, projections, and tests. |

@@ -14,6 +14,8 @@ The login page has a visible email label, password field, keep-signed-in option,
 
 The signed-in home shell gives a clear create-table and join-by-token path and shows connection status. It does not list or resume the user's tables, choose a deck/template or preset, set access and participant permissions, or explain player versus spectator roles. A token-only join flow is difficult to discover and gives no context about the table before joining.
 
+During the live check, creating a table returned a token in the documented `hex.hex` form, but pasting that token into the visible Join table field failed in the browser with `InvalidCharacterError` from the frontend's base64 decoding path. This is a P0 usability and functional defect because the only advertised way to enter another table is broken.
+
 ### Table workspace
 
 The table exposes useful title, status, revision, card count, zone list, and participant information. The visible action set is sparse: Refresh, Draw top, Shuffle, Cut, Deal one each, Collect all, and Reset table. There is no pile management, selection model, action menu, face-up play from hand, rotate/z-order control, zone interaction, or undo affordance. Reset confirmation is a good safeguard, but ordinary actions have little operation feedback and there are no consistent loading/disabled states.
