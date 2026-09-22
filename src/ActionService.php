@@ -20,6 +20,16 @@ final class ActionService
         $requestHash = hash('sha256', self::canonicalJson(['type' => $type, 'payload' => $payload, 'expected_session_revision' => $request['expected_session_revision'] ?? null]));
         $database->beginTransaction();
         try {
+            $sessionStatement = $database->prepare('SELECT * FROM sessions WHERE id = :id FOR UPDATE');
+            $sessionStatement->execute(['id' => $sessionId]);
+            $session = $sessionStatement->fetch();
+            if (!is_array($session)) throw new RuntimeException('Session not found.');
+            $member = SessionService::membership($database, $sessionId, (string) $user['id']);
+            if ($member === null) throw new RuntimeException('Active table membership required.');
+            $capability = self::capabilityForAction($type);
+            if ($capability !== null && !SessionService::hasCapability($member, $capability)) {
+                throw new RuntimeException('This participant is not allowed to perform that action.');
+            }
             $duplicate = $database->prepare(
                 'SELECT request_hash, status, revision, result FROM processed_actions
                  WHERE session_id = :session AND actor_user_id = :actor AND action_id = :action',
@@ -31,12 +41,6 @@ final class ActionService
                 $database->commit();
                 return ['status' => (string) $prior['status'], 'revision' => (int) $prior['revision'], 'result' => json_decode((string) $prior['result'], true, 512, JSON_THROW_ON_ERROR), 'duplicate' => true];
             }
-            $sessionStatement = $database->prepare('SELECT * FROM sessions WHERE id = :id FOR UPDATE');
-            $sessionStatement->execute(['id' => $sessionId]);
-            $session = $sessionStatement->fetch();
-            if (!is_array($session)) throw new RuntimeException('Session not found.');
-            $member = SessionService::membership($database, $sessionId, (string) $user['id']);
-            if ($member === null) throw new RuntimeException('Active table membership required.');
             if ($session['status'] === 'ended' && !in_array($type, ['leave_session', 'reset_session'], true)) throw new RuntimeException('Session has ended.');
             if (array_key_exists('expected_session_revision', $request) && $request['expected_session_revision'] !== null && (int) $request['expected_session_revision'] !== (int) $session['revision']) {
                 throw new RuntimeException('Session changed; refresh and try again.');
@@ -73,7 +77,7 @@ final class ActionService
         $sessionStatement->execute(['id' => $sessionId]);
         $session = $sessionStatement->fetch();
         if (!is_array($session)) throw new RuntimeException('Session not found.');
-        $participants = $database->prepare('SELECT id, user_id, role, seat FROM session_participants WHERE session_id = :session AND removed_at IS NULL ORDER BY created_at, id');
+        $participants = $database->prepare('SELECT id, user_id, role, seat, capabilities FROM session_participants WHERE session_id = :session AND removed_at IS NULL ORDER BY created_at, id');
         $participants->execute(['session' => $sessionId]);
         $hands = $database->prepare('SELECT hand_participant_id AS participant_id, count(*) AS card_count FROM session_cards WHERE session_id = :session AND location_type = \'hand\' GROUP BY hand_participant_id');
         $hands->execute(['session' => $sessionId]);
@@ -132,7 +136,12 @@ final class ActionService
             'revision' => (int) $session['revision'],
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
             'configuration' => json_decode((string) $session['access_settings'], true, 512, JSON_THROW_ON_ERROR),
-            'participants' => array_map(static fn (array $row): array => ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => (string) $row['user_id'] === (string) $userId, 'hand_count' => $handCounts[(string) $row['id']] ?? 0], $participants->fetchAll()),
+            'participants' => array_map(static function (array $row) use ($userId, $handCounts): array {
+                $isCurrent = (string) $row['user_id'] === (string) $userId;
+                $projection = ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => $isCurrent, 'hand_count' => $handCounts[(string) $row['id']] ?? 0];
+                if ($isCurrent) $projection['capabilities'] = SessionService::capabilities($row);
+                return $projection;
+            }, $participants->fetchAll()),
             'containers' => $containerProjection,
             'zones' => $zoneProjection,
             'cards' => $cardProjection,
@@ -149,6 +158,22 @@ final class ActionService
         return ['from_revision' => $after, 'to_revision' => $snapshot['revision'], 'events' => $events, 'snapshot' => $snapshot];
     }
 
+    public static function capabilityForAction(string $type): ?string
+    {
+        return match ($type) {
+            'leave_session' => null,
+            'start_session', 'end_session', 'reset_session', 'collect_all', 'configure_table', 'instantiate_deck' => 'session.manage',
+            'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities' => 'participant.manage',
+            'create_zone', 'delete_zone' => 'zone.manage',
+            'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
+            'move_card', 'move_cards', 'rotate_card', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
+            'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom' => 'pile.manage',
+            'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile' => 'lock.manage',
+            'undo_action' => 'card.undo',
+            default => null,
+        };
+    }
+
     private static function apply(PDO $database, array $session, array $member, array $user, string $type, array $payload): array
     {
         return match ($type) {
@@ -158,6 +183,7 @@ final class ActionService
             'transfer_host' => SessionService::transferHost($database, $session, $member, $payload),
             'remove_participant' => SessionService::removeParticipant($database, $session, $member, $payload),
             'restore_participant' => SessionService::restoreParticipant($database, $session, $member, $payload),
+            'set_participant_capabilities' => SessionService::setCapabilities($database, $session, $member, $payload),
             'instantiate_deck' => self::instantiateDeck($database, $session, $member, $user, $payload),
             'draw_top' => CardService::draw($database, $session, $member, 'top', $payload),
             'draw_bottom' => CardService::draw($database, $session, $member, 'bottom', $payload),
@@ -350,7 +376,7 @@ final class ActionService
             if (is_array($value)) {
                 $clean = [];
                 foreach ($value as $key => $item) {
-                    if (in_array((string) $key, ['card_id', 'card_ids', 'card_definition_id', 'cards', 'secret', 'token', 'owner_user_id', 'undo'], true)) continue;
+                    if (in_array((string) $key, ['card_id', 'card_ids', 'card_definition_id', 'cards', 'secret', 'token', 'owner_user_id', 'undo', 'capabilities'], true)) continue;
                     $clean[$key] = $sanitize($item);
                 }
                 return $clean;

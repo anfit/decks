@@ -120,6 +120,21 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn(":focus-visible", styles)
         self.assertIn("@media (max-width: 600px)", styles)
 
+    def test_table_capabilities_are_allowlisted_role_defaults_and_action_scoped(self) -> None:
+        session = read_text("src/SessionService.php")
+        action = read_text("src/ActionService.php")
+        spec = read_text("spec/19-capability-policy.md")
+        for capability in ("session.manage", "participant.manage", "zone.manage", "deck.manage", "card.manage", "pile.manage", "lock.manage", "card.undo"):
+            self.assertIn(capability, session)
+        self.assertIn("public static function hasCapability", session)
+        self.assertIn("public static function setCapabilities", session)
+        self.assertIn("'set_participant_capabilities'", action)
+        self.assertIn("capabilityForAction", action)
+        self.assertIn("SessionService::hasCapability", action)
+        self.assertIn("'capabilities'", action)
+        self.assertIn("capabilities'], true", action)
+        self.assertIn("unauthorized actions to fail atomically", spec)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)

@@ -9,6 +9,18 @@ use RuntimeException;
 
 final class SessionService
 {
+    /** @var list<string> */
+    private const TABLE_CAPABILITIES = [
+        'session.manage',
+        'participant.manage',
+        'zone.manage',
+        'deck.manage',
+        'card.manage',
+        'pile.manage',
+        'lock.manage',
+        'card.undo',
+    ];
+
     public static function create(PDO $database, array $user, ?string $title = null, int $maxParticipants = 12): array
     {
         if (($user['id'] ?? '') === '') throw new RuntimeException('Authentication required.');
@@ -120,6 +132,53 @@ final class SessionService
         $statement->execute(['session' => $sessionId, 'user' => $userId]);
         $row = $statement->fetch();
         return is_array($row) ? $row : null;
+    }
+
+    /** Return only valid, allowlisted explicit capability decisions. */
+    public static function capabilities(array $member): array
+    {
+        $raw = $member['capabilities'] ?? [];
+        $decoded = is_array($raw) ? $raw : json_decode((string) $raw, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded)) return [];
+        $capabilities = [];
+        foreach (self::TABLE_CAPABILITIES as $capability) {
+            if (array_key_exists($capability, $decoded) && is_bool($decoded[$capability])) {
+                $capabilities[$capability] = $decoded[$capability];
+            }
+        }
+        return $capabilities;
+    }
+
+    public static function hasCapability(array $member, string $capability): bool
+    {
+        $explicit = self::capabilities($member);
+        if (array_key_exists($capability, $explicit)) return $explicit[$capability];
+        if (($member['role'] ?? '') === 'host') return true;
+        if (($member['role'] ?? '') === 'spectator') return false;
+        return in_array($capability, ['deck.manage', 'card.manage', 'pile.manage', 'lock.manage', 'card.undo'], true);
+    }
+
+    public static function setCapabilities(PDO $database, array $session, array $member, array $payload): array
+    {
+        if (($member['role'] ?? null) !== 'host') throw new RuntimeException('Host permission required.');
+        $participantId = (string) ($payload['participant_id'] ?? '');
+        if (!preg_match('/^[0-9a-fA-F-]{36}$/', $participantId)) throw new RuntimeException('Participant reference is invalid.');
+        $requested = $payload['capabilities'] ?? null;
+        if (!is_array($requested)) throw new RuntimeException('Capability map is invalid.');
+        $normalized = [];
+        foreach ($requested as $capability => $enabled) {
+            if (!in_array((string) $capability, self::TABLE_CAPABILITIES, true) || !is_bool($enabled)) {
+                throw new RuntimeException('Capability map contains an invalid entry.');
+            }
+            $normalized[(string) $capability] = $enabled;
+        }
+        $target = $database->prepare('SELECT id FROM session_participants WHERE session_id = :session AND id = :participant AND removed_at IS NULL FOR UPDATE');
+        $target->execute(['session' => $session['id'], 'participant' => $participantId]);
+        if (!$target->fetch()) throw new RuntimeException('Participant not found.');
+        $database->prepare('UPDATE session_participants SET capabilities = CAST(:capabilities AS jsonb) WHERE session_id = :session AND id = :participant')
+            ->execute(['capabilities' => json_encode($normalized, JSON_THROW_ON_ERROR), 'session' => $session['id'], 'participant' => $participantId]);
+        Security::audit($database, (string) $member['user_id'], 'session.participant_capabilities_updated', 'session_participant', $participantId, ['session_id' => (string) $session['id'], 'capability_count' => count($normalized)]);
+        return ['participant_id' => $participantId, 'updated' => true, 'capability_count' => count($normalized)];
     }
 
     public static function leave(PDO $database, array $user, string $sessionId): void
