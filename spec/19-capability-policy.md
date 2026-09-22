@@ -6,4 +6,6 @@ Table roles remain host, player and spectator, while `session_participants.capab
 
 The host-only `set_participant_capabilities` action accepts a participant id and an allowlisted map of capability names to booleans. It validates the target belongs to the same active session, stores only boolean values, advances the session revision and emits sanitized metadata. Every action family maps to one capability check before service mutation; leave/reconnect/read operations remain available according to role and membership.
 
+An authorized host snapshot may include sanitized capability decisions for the active participants so the table surface can render host controls. Other participants receive only their own explicit decisions. The browser hides mutation affordances when the current effective capability is absent, while the service remains the final authorization boundary.
+
 Acceptance requires unauthorized actions to fail atomically, explicit grants/denials to survive reconnect and snapshots, and no capability map or participant identity to leak through public activity events.
