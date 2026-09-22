@@ -5,7 +5,7 @@ type Session = { id: string; title: string | null; status: string; revision: num
 type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
-type Deck = { id: string; label: string | null; card_count: number };
+type Deck = { id: string; label: string | null; card_count: number; version: number };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
@@ -34,7 +34,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   split_pile: "split a pile", merge_piles: "merged piles", collect_spread: "collected cards into a pile", move_pile: "moved a pile",
   rotate_pile: "rotated a pile", label_pile: "changed a pile label", lock_pile: "locked a pile", unlock_pile: "unlocked a pile",
   shuffle_pile: "shuffled a pile", reverse_pile: "reversed a pile", flip_pile: "flipped a pile", spread_pile: "spread a pile",
-  merge_pile_top: "returned a pile to a deck", merge_pile_bottom: "returned a pile to a deck", collect_all: "collected all cards",
+  merge_pile_top: "returned a pile to a deck", merge_pile_bottom: "returned a pile to a deck", merge_pile_shuffle: "shuffled a pile into a deck", collect_all: "collected all cards",
   reset_session: "reset the table", create_zone: "created a zone", delete_zone: "removed a zone", undo_action: "undid a spatial action",
 };
 
@@ -285,6 +285,28 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
       const hint = document.createElement("p"); hint.className = "muted";
       hint.textContent = state.containers.piles.some((candidate) => candidate.id !== pile.id) ? "Unlock another pile to use it as a merge target." : "Create another pile to merge this one.";
       actions.append(hint);
+    }
+    if (currentCan("deck.manage")) {
+      if (state.containers.decks.length > 0) {
+        const deckTarget = document.createElement("select"); deckTarget.setAttribute("aria-label", `Deck destination for ${pile.label || "pile"}`);
+        for (const deck of state.containers.decks) {
+          const option = document.createElement("option"); option.value = deck.id; option.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; deckTarget.append(option);
+        }
+        actions.append(labelled("Merge pile into deck", deckTarget));
+        const mergeIntoDeck = (position: "top" | "bottom" | "shuffle"): void => {
+          const deck = state.containers.decks.find((candidate) => candidate.id === deckTarget.value);
+          if (!deck || pile.card_count === 0) return;
+          const type = position === "shuffle" ? "merge_pile_shuffle" : `merge_pile_${position}`;
+          void action(state.session.id, type, { pile_id: pile.id, deck_id: deck.id, expected_pile_version: pile.version, expected_deck_version: deck.version });
+        };
+        const toTop = button("Merge pile onto deck top", () => mergeIntoDeck("top"), true);
+        const toBottom = button("Merge pile onto deck bottom", () => mergeIntoDeck("bottom"), true);
+        const shuffleIn = button("Shuffle pile into deck", () => mergeIntoDeck("shuffle"), true);
+        toTop.disabled = toBottom.disabled = shuffleIn.disabled = pile.card_count === 0;
+        actions.append(toTop, toBottom, shuffleIn);
+      } else {
+        const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Add a deck before returning this pile to a deck."; actions.append(hint);
+      }
     }
   } else {
     const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = pile.locked ? "Unlock this pile before changing its contents." : "Pile actions are not available for your current permissions."; actions.append(hint);

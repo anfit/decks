@@ -21,7 +21,7 @@ class DecksContractTest(unittest.TestCase):
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")
-        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'return_to_source_decks'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
+        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'return_to_source_decks'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'merge_pile_top'", "'merge_pile_bottom'", "'merge_pile_shuffle'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
             self.assertIn(action, source)
 
     def test_mats_presets_and_private_zone_effects_are_authorized(self) -> None:
@@ -241,7 +241,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $required[] = 'pile.manage'", action)
         self.assertIn("'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage']", action)
         self.assertIn("'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage']", action)
-        self.assertIn("'merge_pile_top', 'merge_pile_bottom' => ['deck.manage']", action)
+        self.assertIn("'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => ['deck.manage']", action)
         self.assertIn("'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck'", action)
         self.assertIn("both `deck.manage` and `pile.manage`", capabilities)
 
@@ -302,6 +302,23 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Card changed; refresh and try again.", pile)
         self.assertIn("hand-selection toolbar also lets them move selected own-hand cards", ui_spec)
         self.assertIn("exact expected-card-version entry for every selected card", pile_spec)
+
+    def test_pile_merge_to_deck_supports_ordered_and_server_randomized_modes(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        action = read_text("src/ActionService.php")
+        pile = read_text("src/PileService.php")
+        capability_spec = read_text("spec/19-capability-policy.md")
+        for label in ("Merge pile onto deck top", "Merge pile onto deck bottom", "Shuffle pile into deck"):
+            self.assertIn(label, frontend)
+        self.assertIn("'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle'", action)
+        self.assertIn("expected_deck_version: deck.version", frontend)
+        self.assertIn("SELECT d.id, d.label, d.version, count(c.id) AS card_count", action)
+        self.assertIn("else $database->prepare('UPDATE session_decks SET version = version + 1 WHERE id = :id')", action)
+        self.assertIn("Expected pile version is required.", pile)
+        self.assertIn("Expected deck version is required.", pile)
+        self.assertIn("if ($position === 'shuffle')", pile)
+        self.assertIn("random_int(0, $index)", pile)
+        self.assertIn("`merge_pile_shuffle` | `pile.manage`, `deck.manage`", capability_spec)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

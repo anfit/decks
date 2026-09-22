@@ -97,16 +97,16 @@ final class ActionService
             $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
         }
         $decks = $database->prepare(
-            "SELECT d.id, d.label, count(c.id) AS card_count
+            "SELECT d.id, d.label, d.version, count(c.id) AS card_count
              FROM session_decks d
              LEFT JOIN session_cards c ON c.session_id = d.session_id AND c.location_type = 'deck' AND c.deck_id = d.id
              WHERE d.session_id = :session
-             GROUP BY d.id, d.label
+             GROUP BY d.id, d.label, d.version
              ORDER BY d.created_at, d.id",
         );
         $decks->execute(['session' => $sessionId]);
         $containerProjection['decks'] = [];
-        foreach ($decks as $deck) $containerProjection['decks'][] = ['id' => (string) $deck['id'], 'label' => $deck['label'] !== null ? (string) $deck['label'] : null, 'card_count' => (int) $deck['card_count']];
+        foreach ($decks as $deck) $containerProjection['decks'][] = ['id' => (string) $deck['id'], 'label' => $deck['label'] !== null ? (string) $deck['label'] : null, 'card_count' => (int) $deck['card_count'], 'version' => (int) $deck['version']];
         $pileMeta = $database->prepare('SELECT id, label, x, y, rotation, z_index, locked_by, version FROM session_piles WHERE session_id = :session ORDER BY z_index, id');
         $pileMeta->execute(['session' => $sessionId]);
         $pileById = [];
@@ -183,7 +183,7 @@ final class ActionService
             'create_zone', 'delete_zone' => 'zone.manage',
             'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
             'move_card', 'move_cards', 'rotate_card', 'rotate_cards', 'set_cards_face', 'reorder_cards', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
-            'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom' => 'pile.manage',
+            'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => 'pile.manage',
             'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile' => 'lock.manage',
             'undo_action' => 'card.undo',
             default => null,
@@ -198,7 +198,7 @@ final class ActionService
         $additional = match ($type) {
             'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage'],
             'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage'],
-            'merge_pile_top', 'merge_pile_bottom' => ['deck.manage'],
+            'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => ['deck.manage'],
             default => [],
         };
         foreach ($additional as $capability) $required[] = $capability;
@@ -256,7 +256,7 @@ final class ActionService
             'reverse_pile' => PileService::reverse($database, $session, $member, $payload, false),
             'flip_pile' => PileService::reverse($database, $session, $member, $payload, true),
             'spread_pile' => PileService::spread($database, $session, $member, $payload),
-            'merge_pile_top', 'merge_pile_bottom' => PileService::mergeIntoDeck($database, $session, $member, $payload, $type === 'merge_pile_top' ? 'top' : 'bottom'),
+            'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => PileService::mergeIntoDeck($database, $session, $member, $payload, match ($type) { 'merge_pile_top' => 'top', 'merge_pile_bottom' => 'bottom', default => 'shuffle' }),
             'collect_all' => self::collectAll($database, $session, $member, $payload),
             'reset_session' => self::resetSession($database, $session, $member, $payload),
             'create_zone' => ZoneService::create($database, $session, $member, $payload),
@@ -312,6 +312,7 @@ final class ActionService
             $deckRows = $order->fetchAll();
             foreach ($deckRows as $index => $row) { $assign->execute(['order' => ($index + 1) * 1000, 'id' => $row['id']]); $count++; }
             if ($mode === 'shuffle') CardService::shuffle($database, $session, $member, ['deck_id' => (string) $deck['id']]);
+            else $database->prepare('UPDATE session_decks SET version = version + 1 WHERE id = :id')->execute(['id' => $deck['id']]);
         }
         return ['collected_cards' => $count, 'mode' => $mode, 'randomized' => $mode === 'shuffle'];
     }

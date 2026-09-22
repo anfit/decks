@@ -240,22 +240,31 @@ final class PileService
         self::assertPlayer($session, $member);
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
         self::assertPileUnlocked($pile, $member);
+        if (!array_key_exists('expected_pile_version', $payload) || filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected pile version is required.');
+        if ((int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         $deckId = (string) ($payload['deck_id'] ?? '');
-        $deck = $database->prepare('SELECT id FROM session_decks WHERE session_id = :session AND id = :id FOR UPDATE');
-        $deck->execute(['session' => $session['id'], 'id' => $deckId]); if (!$deck->fetch()) throw new RuntimeException('Deck not found.');
+        $deck = $database->prepare('SELECT id, version FROM session_decks WHERE session_id = :session AND id = :id FOR UPDATE');
+        $deck->execute(['session' => $session['id'], 'id' => $deckId]); $deckRow = $deck->fetch(); if (!is_array($deckRow)) throw new RuntimeException('Deck not found.');
+        if (!array_key_exists('expected_deck_version', $payload) || filter_var($payload['expected_deck_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected deck version is required.');
+        if ((int) $payload['expected_deck_version'] !== (int) $deckRow['version']) throw new RuntimeException('Deck changed; refresh and try again.');
+        if (!in_array($position, ['top', 'bottom', 'shuffle'], true)) throw new RuntimeException('Deck position is invalid.');
         $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $moving = $cards->fetchAll();
+        if ($moving === []) throw new RuntimeException('The pile is empty.');
         foreach ($moving as $card) self::assertCanControl($card, $member);
         $all = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'deck' AND deck_id = :deck ORDER BY order_key FOR UPDATE");
         $all->execute(['session' => $session['id'], 'deck' => $deckId]); $remaining = $all->fetchAll();
         foreach ($remaining as $card) self::assertCanControl($card, $member);
-        $ordered = $position === 'top' ? array_merge($moving, $remaining) : array_merge($remaining, $moving);
+        $ordered = match ($position) { 'top' => array_merge($moving, $remaining), 'bottom' => array_merge($remaining, $moving), default => array_merge($moving, $remaining) };
+        if ($position === 'shuffle') {
+            for ($index = count($ordered) - 1; $index > 0; $index--) { $swap = random_int(0, $index); [$ordered[$index], $ordered[$swap]] = [$ordered[$swap], $ordered[$index]]; }
+        }
         $update = $database->prepare("UPDATE session_cards SET location_type = 'deck', deck_id = :deck, pile_id = NULL, hand_participant_id = NULL, order_key = :temp, x = NULL, y = NULL, face_state = 'down', version = version + 1 WHERE id = :id");
         foreach ($ordered as $index => $card) $update->execute(['deck' => $deckId, 'temp' => -1000000 + $index, 'id' => $card['id']]);
         self::assignOrder($database, array_map(static fn (array $card): array => ['id' => $card['id']], $ordered));
         $database->prepare('UPDATE session_decks SET version = version + 1 WHERE id = :id')->execute(['id' => $deckId]);
         $database->prepare('UPDATE session_piles SET version = version + 1 WHERE id = :id')->execute(['id' => $pile['id']]);
-        return ['pile_id' => (string) $pile['id'], 'deck_id' => $deckId, 'position' => $position, 'card_count' => count($moving)];
+        return ['position' => $position, 'card_count' => count($moving), 'randomized' => $position === 'shuffle'];
     }
 
     private static function assertPlayer(array $session, array $member): void { if (!in_array($member['role'], ['host', 'player'], true)) throw new RuntimeException('Player permission required.'); if ($session['status'] === 'ended') throw new RuntimeException('Session has ended.'); }
