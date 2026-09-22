@@ -8,6 +8,8 @@ An authenticated Decks account creates a session and becomes its host participan
 
 Table roles are host, player and spectator. A player has one default private hand. A spectator has public projection access and no mutation capability. A removed participant retains cards for host recovery but cannot read or mutate the session. Leaving/disconnect does not remove membership or cards. Starting freezes configuration-level changes; ending makes the session read-only.
 
+The authenticated join surface accepts the opaque `selector.secret` table token directly at `POST /api/sessions/join` with `{ "token": "...", "role": "player|spectator" }`. The server resolves the selector, verifies the secret hash and expiry, and returns the authorized membership including `session_id`; clients must not decode or reinterpret token segments. The session-scoped compatibility route may additionally require an expected session id, but the shared token itself is the complete join credential.
+
 The host may transfer host role, remove/restore participants, freeze/unfreeze configuration and end/reset where capability permits. A global account administrator has no table access unless also a participant. Host disconnect does not elect a replacement automatically.
 
 ## Durable action envelope
