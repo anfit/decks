@@ -88,3 +88,17 @@ Commit `93e8d06` (S17; `spec/15-session-setup-and-capabilities.md`) replaces the
 ## Recent-action history response — 2026-09-22
 
 Commit `68e58cb` (S08; `spec/04-actions.md`) adds a compact recent-action list to the table. Entries use only generic actor labels, safe mapped descriptions, revisions and timestamps; unknown events fall back to a generic description, and history failure does not block table use. The deployed release predates this UI; verify its screen-reader behavior, useful ordering and private-event redaction after rollout.
+
+## Current signed-in browser and source recheck — 2026-09-22
+
+The in-app browser is still authenticated and displays the production `Configured setup verification` table (revision 20, three safe `Smoke card` table cards, two empty piles, host capability panel, empty-hand guidance). The live status reads `Realtime connection closed; retrying`. No state was changed during this recheck. The visible page is still the old production release, so it does not show the newest source's sanitized recent-action list or per-deck draw controls. A current deployer check confirms all three OVH services are stale/unhealthy against desired `a9d012e` / release `d6f739601e783bbf`; they remain on `4e51b2d` / `a70c82c42a9503a6`. Public `/health` returns `ok` but does not establish that the user-facing app is current or that realtime is connected.
+
+The latest source improves the table information architecture by grouping actions under each safe deck label and count, with explicit top/bottom/N and destination controls. It also exposes recent activity without identifiers or private payloads. Source validation is 25/25 Python contract tests, TypeScript typecheck, Vite build and clean diff check. There is still no authenticated browser acceptance for this source, and local PHP/PostgreSQL runtime validation was unavailable. The observed browser therefore confirms a signed-in route and table rendering, while rejecting a claim that the complete product currently works as intended.
+
+### Updated UX disposition
+
+1. Restore the trusted runtime secrets and deploy all three lifecycles; then confirm both release provenance and an open realtime connection before testing the current source.
+2. On the deployed commit, exercise create/repeated-deck setup, resume/join, player and spectator views, accessible card controls, per-deck draw destinations, populated pile actions, host lifecycle/capability actions, action-history privacy, reconnect and conflict feedback using disposable fixtures and a second browser.
+3. Close the remaining interaction gaps with clear, accessible affordances for return/restore, hand management, pile-to-deck and remaining pile actions, participant recovery, and zone editing. Keep unsupported operations out of the user-facing surface until implemented.
+4. Improve dense-session navigation and tabletop ergonomics: search/group the owned-table list, display useful participant names, give the table a pan/zoom strategy, and tune empty/error/disabled/reconnect states and card back/art presentation. Verify keyboard/touch at narrow widths.
+5. Re-run the UX audit against the exact deployed commit and record screenshots or browser evidence. Keep the audit provisional until authenticated, two-client acceptance passes.
