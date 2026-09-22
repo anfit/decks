@@ -25,12 +25,18 @@ final class PileService
         $pileId = (string) ($payload['pile_id'] ?? '');
         $pile = self::pile($database, $session['id'], $pileId);
         self::assertPileUnlocked($pile, $member);
-        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
+        if (!array_key_exists('expected_pile_version', $payload) || filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected pile version is required.');
+        if ((int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         $ids = $payload['card_ids'] ?? [];
         if (!is_array($ids) || count($ids) < 1 || count($ids) > 100 || count(array_unique(array_map('strval', $ids))) !== count($ids)) throw new RuntimeException('Card selection is invalid.');
+        $versions = $payload['expected_card_versions'] ?? null;
+        if (!is_array($versions) || count($versions) !== count($ids)) throw new RuntimeException('Expected card versions are required.');
         $cards = []; $sourcePiles = [];
         foreach ($ids as $id) {
+            $cardId = (string) $id;
+            if (!array_key_exists($cardId, $versions) || filter_var($versions[$cardId], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected card versions are required.');
             $card = self::card($database, $session['id'], (string) $id);
+            if ((int) $versions[$cardId] !== (int) $card['version']) throw new RuntimeException('Card changed; refresh and try again.');
             if ((string) $card['location_type'] === 'deck') throw new RuntimeException('Draw a deck card before placing it in a pile.');
             self::assertCanControl($card, $member);
             if ($card['location_type'] === 'pile') {

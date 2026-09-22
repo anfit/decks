@@ -567,6 +567,28 @@ function renderBoard(state: State): void {
         returnCards.disabled = selectedHandCardIds.size === 0; handSelectionButtons.push(returnCards); handActions.append(returnCards);
       }
     }
+    if (currentCan("pile.manage")) {
+      const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked);
+      if (unlockedPiles.length > 0) {
+        const target = document.createElement("select"); target.setAttribute("aria-label", "Destination pile for selected hand cards");
+        for (const pile of unlockedPiles) {
+          const option = document.createElement("option"); option.value = pile.id; option.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards`; target.append(option);
+        }
+        handActions.append(labelled("Move selected hand cards into pile", target));
+        const moveToPile = button("Move selected hand cards into pile", () => {
+          const selected = versionPayload();
+          if (selected.card_ids.length === 0) return;
+          const pile = unlockedPiles.find((candidate) => candidate.id === target.value);
+          if (!pile) return;
+          selectedHandCardIds.clear(); updateHandSelectionUi();
+          void action(state.session.id, "move_to_pile", { pile_id: pile.id, expected_pile_version: pile.version, ...selected });
+        }, true);
+        moveToPile.disabled = selectedHandCardIds.size === 0;
+        handSelectionButtons.push(moveToPile); handActions.append(moveToPile);
+      } else {
+        const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Create or unlock a pile before moving hand cards into it."; handActions.append(hint);
+      }
+    }
     hand.append(handActions);
   }
   board.append(hand);

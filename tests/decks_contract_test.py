@@ -289,6 +289,20 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("exact expected-version entry for every selected card", action_spec)
         self.assertIn("hand-card-tools", styles)
 
+    def test_private_hand_selection_can_move_into_unlocked_pile_with_exact_versions(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        pile = read_text("src/PileService.php")
+        ui_spec = read_text("spec/07-table-interaction.md")
+        pile_spec = read_text("spec/16-pile-operations.md")
+        self.assertIn('const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked)', frontend)
+        self.assertIn('"Move selected hand cards into pile"', frontend)
+        self.assertIn('"move_to_pile", { pile_id: pile.id, expected_pile_version: pile.version, ...selected }', frontend)
+        self.assertIn("Expected card versions are required.", pile)
+        self.assertIn("Expected pile version is required.", pile)
+        self.assertIn("Card changed; refresh and try again.", pile)
+        self.assertIn("hand-selection toolbar also lets them move selected own-hand cards", ui_spec)
+        self.assertIn("exact expected-card-version entry for every selected card", pile_spec)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)
