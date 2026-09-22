@@ -68,24 +68,66 @@ function renderHome(user: User): void {
   const title = document.createElement("input"); title.placeholder = "Table name (optional)"; title.autocomplete = "off";
   const maxParticipants = document.createElement("input"); maxParticipants.type = "number"; maxParticipants.min = "1"; maxParticipants.max = "100"; maxParticipants.value = "12";
   const preset = document.createElement("select"); preset.name = "preset"; preset.innerHTML = '<option value="">No preset</option>';
-  const template = document.createElement("select"); template.name = "template"; template.innerHTML = '<option value="">No standalone deck</option>';
+  const deckTemplateVersions: Array<{ id: string; label: string }> = [];
+  const deckChoices = document.createElement("div"); deckChoices.className = "deck-selections";
+  const fillDeckSelector = (select: HTMLSelectElement): void => {
+    select.replaceChildren();
+    const empty = document.createElement("option"); empty.value = ""; empty.textContent = "No deck selected"; select.append(empty);
+    for (const version of deckTemplateVersions) {
+      const option = document.createElement("option"); option.value = version.id; option.textContent = version.label; select.append(option);
+    }
+  };
+  const relabelDeckChoices = (): void => {
+    Array.from(deckChoices.querySelectorAll<HTMLElement>(".deck-selection")).forEach((row, index) => {
+      const labelText = row.querySelector("label span");
+      if (labelText) labelText.textContent = `Deck ${index + 1} template version`;
+      const select = row.querySelector("select");
+      select?.setAttribute("aria-label", `Deck ${index + 1} template version`);
+      const remove = row.querySelector("button");
+      if (remove) remove.textContent = `Remove deck ${index + 1}`;
+    });
+  };
+  const addDeckChoice = (): void => {
+    const row = document.createElement("div"); row.className = "deck-selection";
+    const select = document.createElement("select"); select.name = "template"; fillDeckSelector(select);
+    const label = document.createElement("label");
+    const labelText = document.createElement("span"); label.append(labelText, select);
+    row.append(label, button("Remove deck", () => { row.remove(); relabelDeckChoices(); }, true));
+    deckChoices.append(row); relabelDeckChoices();
+  };
+  const deckFieldset = document.createElement("fieldset");
+  const deckLegend = document.createElement("legend"); deckLegend.textContent = "Decks";
+  deckFieldset.append(deckLegend, deckChoices, button("Add another deck", addDeckChoice, true));
+  addDeckChoice();
+  let createdSession: { id: string; join_token: string } | null = null;
   const createButton = button("Create table", async () => {
+    createButton.disabled = true;
+    createdSession = null;
     try {
       const result = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: title.value.trim() || null, max_participants: Number(maxParticipants.value) || 12 }) });
+      createdSession = result.session as { id: string; join_token: string };
       let revision = Number(result.session.revision ?? 0);
       const selectedPreset = preset.value ? (preset.selectedOptions[0]?.dataset.templateVersion ? { id: preset.value, template_version_id: preset.selectedOptions[0].dataset.templateVersion } : null) : null;
-      const selectedTemplateVersion = template.value || null;
+      const selectedTemplateVersions = Array.from(deckChoices.querySelectorAll<HTMLSelectElement>('select[name="template"]')).map((select) => select.value).filter((versionId) => versionId !== "");
       if (selectedPreset) {
         const configured = await sessionAction(result.session.id, revision, "configure_table", { preset_id: selectedPreset.id }); revision = Number(configured.revision);
         const instantiated = await sessionAction(result.session.id, revision, "instantiate_deck", { template_version_id: selectedPreset.template_version_id, label: "Preset deck" }); revision = Number(instantiated.revision);
-      } else if (selectedTemplateVersion) {
-        await sessionAction(result.session.id, revision, "instantiate_deck", { template_version_id: selectedTemplateVersion, label: "Deck" });
+      }
+      for (const [index, templateVersionId] of selectedTemplateVersions.entries()) {
+        const instantiated = await sessionAction(result.session.id, revision, "instantiate_deck", { template_version_id: templateVersionId, label: `Deck ${index + 1}` });
+        revision = Number(instantiated.revision);
       }
       showJoinResult(result.session);
     }
-    catch (error) { setStatus((error as Error).message, "error"); }
+    catch (error) {
+      if (createdSession) {
+        showJoinResult(createdSession);
+        setStatus(`Table created, but deck setup stopped partway: ${(error as Error).message}. Some selected decks may be missing.`, "error");
+      } else setStatus((error as Error).message, "error");
+    }
+    finally { createButton.disabled = false; }
   });
-  create.append(labelled("Table name", title), labelled("Maximum participants", maxParticipants), labelled("Preset", preset), labelled("Deck template version", template), createButton); workspace.append(create);
+  create.append(labelled("Table name", title), labelled("Maximum participants", maxParticipants), labelled("Preset", preset), deckFieldset, createButton); workspace.append(create);
   const join = document.createElement("section"); join.className = "panel";
   const joinHeading = document.createElement("h2"); joinHeading.textContent = "Join a table"; join.append(joinHeading);
   const token = document.createElement("input"); token.placeholder = "Paste table join token"; token.autocomplete = "off";
@@ -101,7 +143,7 @@ function renderHome(user: User): void {
   });
   join.append(labelled("Table token", token), labelled("Role", role), joinButton); workspace.append(join);
   const invite = document.createElement("a"); invite.href = "/account/invite"; invite.textContent = "Invite someone to Decks"; workspace.append(invite);
-  void loadHomeData(preset, template);
+  void loadHomeData(preset, deckChoices, deckTemplateVersions, fillDeckSelector);
   setStatus("Ready", "ok");
 }
 
@@ -109,7 +151,7 @@ async function sessionAction(sessionId: string, revision: number, type: string, 
   return api(`/api/sessions/${sessionId}/actions`, { method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), type, payload, expected_session_revision: revision }) });
 }
 
-async function loadHomeData(preset: HTMLSelectElement, template: HTMLSelectElement): Promise<void> {
+async function loadHomeData(preset: HTMLSelectElement, deckChoices: HTMLElement, deckTemplateVersions: Array<{ id: string; label: string }>, fillDeckSelector: (select: HTMLSelectElement) => void): Promise<void> {
   try {
     const [sessions, presets, templates] = await Promise.all([api("/api/sessions"), api("/api/mats-and-presets"), api("/api/templates")]);
     if (currentState !== null || !workspace) return;
@@ -119,9 +161,10 @@ async function loadHomeData(preset: HTMLSelectElement, template: HTMLSelectEleme
     for (const item of (templates.templates as Template[] ?? [])) {
       for (const version of item.versions ?? []) {
         if (version.definition_count < 1) continue;
-        const option = document.createElement("option"); option.value = version.id; option.textContent = `${item.name} · v${version.version} · ${version.definition_count} definitions`; template.append(option);
+        deckTemplateVersions.push({ id: version.id, label: `${item.name} · v${version.version} · ${version.definition_count} definitions` });
       }
     }
+    deckChoices.querySelectorAll<HTMLSelectElement>('select[name="template"]').forEach(fillDeckSelector);
     const section = document.createElement("section"); section.className = "panel";
     const heading = document.createElement("h2"); heading.textContent = "Your tables"; section.append(heading);
     const rows = sessions.sessions as Array<{ id: string; title: string | null; status: string; revision: number; role: string }> ?? [];

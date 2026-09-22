@@ -31,6 +31,11 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .status { min-height: 1.5rem; margin-bottom: 0; color: #1459a6; }
 .status[data-state="error"] { color: #9e2b2b; }
 .panel { display: grid; gap: .65rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd5dc; border-radius: .6rem; background: #f8fafb; }
+fieldset { min-width: 0; margin: 0; padding: .75rem; border: 1px solid #cbd5dc; border-radius: .45rem; }
+fieldset legend { padding: 0 .25rem; font-weight: 700; }
+.deck-selections { display: grid; gap: .6rem; }
+.deck-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: end; }
+.deck-selection button { min-height: 2.75rem; }
 input, textarea, select { width: 100%; border: 1px solid #9aa8b3; border-radius: .35rem; padding: .65rem; font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #f2c14e; outline-offset: 2px; }
 label { display: grid; gap: .35rem; font-size: .9rem; }

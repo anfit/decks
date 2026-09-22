@@ -83,6 +83,10 @@ class DecksContractTest(unittest.TestCase):
         for endpoint in ("api(\"/api/sessions\")", "api(\"/api/mats-and-presets\")", "api(\"/api/templates\")"):
             self.assertIn(endpoint, frontend)
         self.assertIn("sessionAction(result.session.id", frontend)
+        self.assertIn('button("Add another deck"', frontend)
+        self.assertIn('select[name="template"]', frontend)
+        self.assertIn("selectedTemplateVersions.entries()", frontend)
+        self.assertIn("Some selected decks may be missing.", frontend)
         self.assertIn("Spectator", frontend)
         self.assertIn("Your tables", frontend)
 
