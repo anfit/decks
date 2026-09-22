@@ -84,3 +84,7 @@ The repeated reconnect state led to a source fix in commit `a0abcb8` (S08; `spec
 ## Multi-deck setup response — 2026-09-22
 
 Commit `93e8d06` (S17; `spec/15-session-setup-and-capabilities.md`) replaces the single deck selector with repeatable, accessible template-version rows. Duplicate versions are permitted to represent multiple copies, and additional deck instances can accompany a preset's pinned deck. Creation submits setup actions in revision order, disables the create button while pending and preserves access to a partially configured session if an action fails. The current production release predates this change, so confirm its layout and multi-deck behavior after deployment.
+
+## Recent-action history response — 2026-09-22
+
+Commit `68e58cb` (S08; `spec/04-actions.md`) adds a compact recent-action list to the table. Entries use only generic actor labels, safe mapped descriptions, revisions and timestamps; unknown events fall back to a generic description, and history failure does not block table use. The deployed release predates this UI; verify its screen-reader behavior, useful ordering and private-event redaction after rollout.
