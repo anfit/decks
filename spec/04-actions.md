@@ -41,6 +41,10 @@ S05/S07 implement `create_session`, `join_session`, `leave_session`, `start_sess
 
 Actions that reveal hidden state or change randomness have no unilateral undo. Durable event history stores action metadata only; card identities, definitions, arrays, secrets and peek results are excluded from public event payloads. Spatial/public actions may later support dependency-checked inverse actions.
 
+## Recent action history projection
+
+The table workspace displays a read-only recent-action list from the authenticated session `changes` endpoint. It may show the revision, timestamp, a generic actor label (`You` or `A participant`), and a human-readable verb mapped from an allowlisted `action_type`. It must not display account email, participant or object IDs, raw event payloads, hidden card names, private hand contents, deck/pile order, peek results, or randomized outcomes. Unknown action types use a generic safe description. The list is newest-first and bounded to the latest 20 events from a recent revision window; it updates after authorized snapshots and does not block table actions if the history request fails. Loading and unavailable states are announced accessibly without exposing server details.
+
 ## Error envelope
 
 HTTP errors use a stable JSON shape with `error`, `message`, `session_revision` where known, and an optional authorized `current` projection. Error messages do not include hidden card identities, private order, token secrets, SQL or filesystem paths.
