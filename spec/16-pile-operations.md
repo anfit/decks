@@ -1,0 +1,9 @@
+# Pile operation completion
+
+Status: S18 implementation slice, 2026-09-22.
+
+Piles are first-class public containers. Their card order is server-authoritative: top is the lowest `order_key`, bottom is the highest. `draw_pile_top` and `draw_pile_bottom` atomically move a requested count to the actor's private hand and expose only the resulting count to other participants. `split_pile` creates a new pile from a top slice; `merge_piles` moves all source cards into a target pile at top or bottom and removes the empty source. `collect_spread` moves an explicitly selected set of public table cards into a pile without silently changing unrelated containment.
+
+Hosts and players may move or rotate a pile, set its label, and lock/unlock it. A pile lock blocks foreign card and spatial mutations until its owner unlocks it; every mutation accepts the expected pile version and advances it atomically. Hidden/private cards remain subject to the existing card-control and projection rules.
+
+Acceptance requires action-registry coverage, transaction-scoped version checks, same-session validation, sanitized events, and focused contract tests for draw, split, merge, collect-spread, spatial updates and locks.
