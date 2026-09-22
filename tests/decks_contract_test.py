@@ -140,6 +140,20 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn(":focus-visible", styles)
         self.assertIn("@media (max-width: 600px)", styles)
 
+    def test_frontend_refresh_preserves_current_realtime_socket(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        render_table = frontend.split("function renderTable(state: State): void {", 1)[1].split("\nfunction renderBoard", 1)[0]
+        self.assertNotIn("connectRealtime(", render_table)
+        open_table = frontend.split("async function openTable(sessionId: string): Promise<void> {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("connectRealtime(sessionId)", open_table)
+        realtime = frontend.split("function disconnectRealtime(): void {", 1)[1].split("\nasync function start", 1)[0]
+        self.assertIn("realtimeGeneration", realtime)
+        self.assertIn("socket !== activeSocket", realtime)
+        self.assertIn("window.clearTimeout", realtime)
+        self.assertIn('activeSocket.addEventListener("open"', realtime)
+        self.assertIn('activeSocket.addEventListener("message"', realtime)
+        self.assertIn('activeSocket.addEventListener("close"', realtime)
+
     def test_table_capabilities_are_allowlisted_role_defaults_and_action_scoped(self) -> None:
         session = read_text("src/SessionService.php")
         action = read_text("src/ActionService.php")

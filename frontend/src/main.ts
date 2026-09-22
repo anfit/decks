@@ -23,6 +23,9 @@ let csrf = "";
 let currentState: State | null = null;
 let socket: WebSocket | null = null;
 let realtimeRetry = 0;
+let realtimeSessionId: string | null = null;
+let realtimeGeneration = 0;
+let realtimeRetryTimer: number | null = null;
 let selectionMode = false;
 const selectedCardIds = new Set<string>();
 let selectionCountLabel: HTMLElement | null = null;
@@ -57,7 +60,7 @@ function labelled(labelText: string, control: HTMLElement): HTMLLabelElement {
 
 function renderHome(user: User): void {
   if (!workspace) return;
-  currentState = null; socket?.close(); socket = null;
+  currentState = null; disconnectRealtime();
   workspace.replaceChildren();
   const greeting = document.createElement("p"); greeting.textContent = `Signed in as ${user.email}`; workspace.append(greeting);
   const create = document.createElement("section"); create.className = "panel";
@@ -334,8 +337,6 @@ function renderTable(state: State): void {
   workspace.append(controls);
   renderBoard(state);
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);
-  connectRealtime(state.session.id);
-  setStatus("Connected", "ok");
 }
 
 function renderBoard(state: State): void {
@@ -508,17 +509,64 @@ async function action(sessionId: string, type: string, payload: Record<string, u
 
 async function refreshTable(sessionId: string): Promise<void> { const result = await api(`/api/sessions/${sessionId}/state`); renderTable(result.state as State); }
 
-function connectRealtime(sessionId: string): void {
-  void api(`/api/sessions/${sessionId}/realtime-ticket`, { method: "POST" }).then((result) => {
-    realtimeRetry = 0;
-    socket?.close(); const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(`${protocol}//${location.host}/ws?ticket=${encodeURIComponent(result.ticket as string)}`);
-    socket.addEventListener("message", (event) => { const message = JSON.parse(event.data as string) as { type?: string }; if (message.type === "session_changed") void refreshTable(sessionId); });
-    socket.addEventListener("close", () => { setStatus("Realtime connection closed; retrying", "error"); const delay = Math.min(30000, 1000 * 2 ** realtimeRetry++); window.setTimeout(() => connectRealtime(sessionId), delay); });
-  }).catch((error: unknown) => { setStatus(`Realtime unavailable: ${(error as Error).message}`, "error"); const delay = Math.min(30000, 1000 * 2 ** realtimeRetry++); window.setTimeout(() => connectRealtime(sessionId), delay); });
+function disconnectRealtime(): void {
+  realtimeGeneration++;
+  realtimeSessionId = null;
+  if (realtimeRetryTimer !== null) { window.clearTimeout(realtimeRetryTimer); realtimeRetryTimer = null; }
+  const activeSocket = socket;
+  socket = null;
+  activeSocket?.close();
 }
 
-async function openTable(sessionId: string): Promise<void> { try { await refreshTable(sessionId); } catch (error) { setStatus((error as Error).message, "error"); } }
+function scheduleRealtimeReconnect(sessionId: string, generation: number): void {
+  if (generation !== realtimeGeneration || realtimeSessionId !== sessionId || realtimeRetryTimer !== null) return;
+  const delay = Math.min(30000, 1000 * 2 ** realtimeRetry++);
+  realtimeRetryTimer = window.setTimeout(() => {
+    realtimeRetryTimer = null;
+    if (generation === realtimeGeneration && realtimeSessionId === sessionId && socket === null) connectRealtime(sessionId);
+  }, delay);
+}
+
+function connectRealtime(sessionId: string): void {
+  if (realtimeSessionId !== null && realtimeSessionId !== sessionId) disconnectRealtime();
+  if (realtimeSessionId === sessionId && socket !== null && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) return;
+  if (realtimeRetryTimer !== null) { window.clearTimeout(realtimeRetryTimer); realtimeRetryTimer = null; }
+  realtimeSessionId = sessionId;
+  const generation = ++realtimeGeneration;
+  setStatus("Connecting to table…", "pending");
+  void api(`/api/sessions/${sessionId}/realtime-ticket`, { method: "POST" }).then((result) => {
+    if (generation !== realtimeGeneration || realtimeSessionId !== sessionId) return;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const activeSocket = new WebSocket(`${protocol}//${location.host}/ws?ticket=${encodeURIComponent(result.ticket as string)}`);
+    socket = activeSocket;
+    activeSocket.addEventListener("open", () => {
+      if (generation !== realtimeGeneration || socket !== activeSocket) return;
+      realtimeRetry = 0;
+      setStatus("Connected", "ok");
+    });
+    activeSocket.addEventListener("message", (event) => {
+      if (generation !== realtimeGeneration || socket !== activeSocket) return;
+      const message = JSON.parse(event.data as string) as { type?: string };
+      if (message.type === "session_changed") void refreshTable(sessionId).catch((error: unknown) => setStatus(`Table refresh failed: ${(error as Error).message}`, "error"));
+    });
+    activeSocket.addEventListener("close", () => {
+      if (generation !== realtimeGeneration || socket !== activeSocket) return;
+      socket = null;
+      setStatus("Realtime connection closed; retrying", "error");
+      scheduleRealtimeReconnect(sessionId, generation);
+    });
+  }).catch((error: unknown) => {
+    if (generation !== realtimeGeneration || realtimeSessionId !== sessionId) return;
+    setStatus(`Realtime unavailable: ${(error as Error).message}`, "error");
+    scheduleRealtimeReconnect(sessionId, generation);
+  });
+}
+
+async function openTable(sessionId: string): Promise<void> {
+  if (realtimeSessionId !== null && realtimeSessionId !== sessionId) disconnectRealtime();
+  try { await refreshTable(sessionId); connectRealtime(sessionId); }
+  catch (error) { setStatus((error as Error).message, "error"); }
+}
 
 async function start(): Promise<void> {
   try {
