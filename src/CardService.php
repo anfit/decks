@@ -150,9 +150,19 @@ final class CardService
     {
         if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
         $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? '')); self::assertVersion($card, $payload); if ($card['location_type'] !== 'removed') throw new RuntimeException('Card is not removed.');
-        $deckId = (string) $card['source_deck_id']; $order = self::nextOrder($database, $session['id'], 'deck', $deckId);
-        $database->prepare("UPDATE session_cards SET location_type='deck', deck_id=:deck, order_key=:order, face_state='down', version=version+1 WHERE id=:id")->execute(['deck'=>$deckId,'order'=>$order+1000,'id'=>$card['id']]); self::bumpDeck($database,$deckId);
-        return ['card_id'=>(string)$card['id'],'deck_id'=>$deckId,'restored'=>true];
+        $deckId = (string) $card['source_deck_id']; self::deck($database, $session['id'], $deckId);
+        $position = ($payload['position'] ?? 'bottom'); if (!in_array($position, ['top', 'bottom', 'shuffle'], true)) throw new RuntimeException('Restore position is invalid.');
+        $existing = $database->prepare("SELECT id FROM session_cards WHERE session_id=:session AND location_type='deck' AND deck_id=:deck ORDER BY order_key FOR UPDATE");
+        $existing->execute(['session'=>$session['id'],'deck'=>$deckId]); $rows = $existing->fetchAll();
+        $restored = ['id' => (string) $card['id']];
+        $ordered = $position === 'top' ? array_merge([$restored], $rows) : array_merge($rows, [$restored]);
+        if ($position === 'shuffle') {
+            for ($i = count($ordered) - 1; $i > 0; $i--) { $j = random_int(0, $i); [$ordered[$i], $ordered[$j]] = [$ordered[$j], $ordered[$i]]; }
+        }
+        $database->prepare("UPDATE session_cards SET location_type='deck', deck_id=:deck, pile_id=NULL, hand_participant_id=NULL, order_key=:temporary, x=NULL, y=NULL, face_state='down', owner_user_id=NULL, locked_by=NULL, version=version+1 WHERE session_id=:session AND id=:id")
+            ->execute(['deck'=>$deckId,'session'=>$session['id'],'id'=>$card['id'],'temporary'=>-1000000]);
+        self::assignOrder($database, $ordered); self::bumpDeck($database,$deckId);
+        return ['card_id'=>(string)$card['id'],'deck_id'=>$deckId,'restored'=>true,'position'=>$position,'randomized'=>$position==='shuffle'];
     }
 
     public static function lock(PDO $database, array $session, array $member, array $payload, bool $locked): array

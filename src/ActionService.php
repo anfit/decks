@@ -192,7 +192,7 @@ final class ActionService
             'flip_pile' => PileService::reverse($database, $session, $member, $payload, true),
             'spread_pile' => PileService::spread($database, $session, $member, $payload),
             'merge_pile_top', 'merge_pile_bottom' => PileService::mergeIntoDeck($database, $session, $member, $payload, $type === 'merge_pile_top' ? 'top' : 'bottom'),
-            'collect_all' => self::collectAll($database, $session, $member),
+            'collect_all' => self::collectAll($database, $session, $member, $payload),
             'reset_session' => self::resetSession($database, $session, $member, $payload),
             'create_zone' => ZoneService::create($database, $session, $member, $payload),
             'delete_zone' => ZoneService::delete($database, $session, $member, $payload),
@@ -223,9 +223,11 @@ final class ActionService
         return ['participant_id' => (string) $member['id'], 'removed' => true];
     }
 
-    private static function collectAll(PDO $database, array $session, array $member): array
+    private static function collectAll(PDO $database, array $session, array $member, array $payload = []): array
     {
         if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
+        $mode = (string) ($payload['mode'] ?? 'original');
+        if (!in_array($mode, ['original', 'shuffle', 'preserve'], true)) throw new RuntimeException('Collect mode is invalid.');
         $cards = $database->prepare('SELECT id, source_deck_id FROM session_cards WHERE session_id = :session FOR UPDATE');
         $cards->execute(['session' => $session['id']]);
         $rows = $cards->fetchAll();
@@ -234,11 +236,19 @@ final class ActionService
         $database->prepare('DELETE FROM session_piles WHERE session_id = :session')->execute(['session' => $session['id']]);
         $decks = $database->prepare('SELECT id FROM session_decks WHERE session_id = :session ORDER BY id FOR UPDATE');
         $decks->execute(['session' => $session['id']]);
-        $order = $database->prepare('SELECT c.id FROM session_cards c JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session AND c.deck_id = :deck ORDER BY d.ordinal, c.id');
+        $orderSql = $mode === 'preserve'
+            ? "SELECT c.id FROM session_cards c WHERE c.session_id = :session AND c.deck_id = :deck ORDER BY c.order_key NULLS LAST, c.id"
+            : 'SELECT c.id FROM session_cards c JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session AND c.deck_id = :deck ORDER BY d.ordinal, c.id';
+        $order = $database->prepare($orderSql);
         $assign = $database->prepare('UPDATE session_cards SET order_key = :order WHERE id = :id');
         $count = 0;
-        foreach ($decks as $deck) { $order->execute(['session' => $session['id'], 'deck' => $deck['id']]); foreach ($order->fetchAll() as $index => $row) { $assign->execute(['order' => ($index + 1) * 1000, 'id' => $row['id']]); $count++; } }
-        return ['collected_cards' => $count];
+        foreach ($decks as $deck) {
+            $order->execute(['session' => $session['id'], 'deck' => $deck['id']]);
+            $deckRows = $order->fetchAll();
+            foreach ($deckRows as $index => $row) { $assign->execute(['order' => ($index + 1) * 1000, 'id' => $row['id']]); $count++; }
+            if ($mode === 'shuffle') CardService::shuffle($database, $session, $member, ['deck_id' => (string) $deck['id']]);
+        }
+        return ['collected_cards' => $count, 'mode' => $mode, 'randomized' => $mode === 'shuffle'];
     }
 
     private static function resetSession(PDO $database, array $session, array $member, array $payload): array

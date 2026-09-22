@@ -100,6 +100,14 @@ class DecksContractTest(unittest.TestCase):
         for method in ("public static function draw", "public static function split", "public static function merge", "public static function collectSpread", "public static function updateGeometry", "public static function label", "public static function lock"):
             self.assertIn(method, pile)
 
+    def test_restore_and_collect_modes_are_explicit_and_server_authoritative(self) -> None:
+        card = read_text("src/CardService.php")
+        for mode in ("top", "bottom", "shuffle"):
+            self.assertIn(f"'{mode}'", card)
+        action = read_text("src/ActionService.php")
+        self.assertIn("['original', 'shuffle', 'preserve']", action)
+        self.assertIn("CardService::shuffle($database, $session, $member", action)
+
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")
         self.assertIn('id="workspace"', source)
