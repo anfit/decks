@@ -13,7 +13,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
         self.assertIn("'zones' => $zoneProjection", source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
-        self.assertIn("face_state, owner_user_id, version", source)
+        self.assertIn("c.face_state, c.owner_user_id, c.version", source)
         self.assertIn("SELECT id, geometry, priority, behavior FROM session_zones", read_text("src/CardService.php"))
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
@@ -107,6 +107,18 @@ class DecksContractTest(unittest.TestCase):
         action = read_text("src/ActionService.php")
         self.assertIn("['original', 'shuffle', 'preserve']", action)
         self.assertIn("CardService::shuffle($database, $session, $member", action)
+
+    def test_visible_card_labels_and_accessible_controls_do_not_expand_hidden_projection(self) -> None:
+        action = read_text("src/ActionService.php")
+        self.assertIn("d.display_name", action)
+        self.assertIn("'card_label'", action)
+        frontend = read_text("frontend/src/main.ts")
+        self.assertIn('item.tabIndex = 0', frontend)
+        self.assertIn('event.key === "Enter"', frontend)
+        self.assertIn('button("Play face up"', frontend)
+        styles = read_text("frontend/src/styles.css")
+        self.assertIn(":focus-visible", styles)
+        self.assertIn("@media (max-width: 600px)", styles)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

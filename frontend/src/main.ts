@@ -6,7 +6,7 @@ type Preset = { id: string; name: string; template_version_id: string; mat_versi
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
-type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
+type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
 type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Array<{ id: string; role: string; is_current: boolean; hand_count: number }>; containers: { decks: Array<{ id: string; card_count: number }>; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
@@ -203,8 +203,9 @@ function renderBoard(state: State): void {
   }
   handCards.forEach((card, index) => {
     const item = renderCard(card, index, true);
-    const play = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
-    item.append(play);
+    const playDown = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
+    const playUp = button("Play face up", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "up", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
+    item.append(playDown, playUp);
     handRow.append(item);
   });
   hand.append(handRow); board.append(hand);
@@ -214,6 +215,7 @@ function renderBoard(state: State): void {
 function renderCard(card: Card, index: number, inHand = false): HTMLElement {
   const item = document.createElement("article");
   item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
+  item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);
   const x = card.x ?? 24 + (index % 8) * 74;
@@ -242,9 +244,10 @@ function renderCard(card: Card, index: number, inHand = false): HTMLElement {
       if (moved) void action(statefulSessionId(), "move_card", { card_id: card.id, x: nextX, y: nextY, rotation: card.rotation, z_index: card.z_index, expected_card_version: card.version });
     });
     item.addEventListener("dblclick", () => void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }));
+    item.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); } });
   }
   const label = document.createElement("strong");
-  label.textContent = card.card_definition_id ? `Card ${card.card_definition_id.slice(0, 8)}` : (card.face_state === "private" ? "Private card" : "Face down");
+  label.textContent = card.card_label || (card.face_state === "private" ? "Private card" : "Face down");
   item.append(label);
   return item;
 }

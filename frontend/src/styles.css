@@ -30,15 +30,17 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .status { min-height: 1.5rem; margin-bottom: 0; color: #1459a6; }
 .status[data-state="error"] { color: #9e2b2b; }
 .panel { display: grid; gap: .65rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd5dc; border-radius: .6rem; background: #f8fafb; }
-input, textarea { width: 100%; border: 1px solid #9aa8b3; border-radius: .35rem; padding: .65rem; font: inherit; }
+input, textarea, select { width: 100%; border: 1px solid #9aa8b3; border-radius: .35rem; padding: .65rem; font: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #f2c14e; outline-offset: 2px; }
 label { display: grid; gap: .35rem; font-size: .9rem; }
 .result textarea { font-family: ui-monospace, monospace; font-size: .8rem; }
 .players { padding-left: 1.25rem; line-height: 1.7; }
 .table-view { display: grid; gap: .75rem; margin-top: 1.5rem; }
 .table-view h3 { margin: .25rem 0; }
-.table-surface { position: relative; min-height: 20rem; overflow: hidden; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }
+.table-surface { position: relative; min-height: 20rem; overflow: auto; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }
 .table-empty { margin: 2rem; color: #dbece2; }
-.card { position: absolute; display: grid; place-items: center; width: 4.3rem; min-height: 6rem; padding: .35rem; border: 2px solid #d4dce2; border-radius: .45rem; background: #fff; color: #1e2933; box-shadow: 0 .35rem .5rem #10261b66; cursor: grab; touch-action: none; user-select: none; text-align: center; }
+.card { position: absolute; display: grid; place-items: center; width: 4.3rem; min-height: 6rem; padding: .35rem; border: 2px solid #d4dce2; border-radius: .45rem; background: #fff; color: #1e2933; box-shadow: 0 .35rem .5rem #10261b66; cursor: grab; touch-action: manipulation; user-select: none; text-align: center; }
+.card:focus-visible { outline: 3px solid #f2c14e; outline-offset: 3px; }
 .card strong { max-width: 100%; overflow: hidden; font-size: .68rem; overflow-wrap: anywhere; }
 .card.face-down { border-color: #9db3c7; background: repeating-linear-gradient(135deg, #315a80 0, #315a80 .25rem, #477ba8 .25rem, #477ba8 .5rem); color: #fff; }
 .card.face-down strong { visibility: hidden; }
@@ -47,3 +49,6 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .hand-cards { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-start; }
 .hand-cards .card { position: relative; left: auto !important; top: auto !important; transform: none !important; cursor: default; }
 .hand-cards .card button { grid-column: 1; font-size: .68rem; padding: .4rem .5rem; }
+.actions label { display: flex; align-items: center; gap: .35rem; }
+.session-row, .pile-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; justify-content: space-between; padding: .4rem 0; }
+@media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .table-surface { min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .actions button, .actions select { min-height: 2.75rem; } }

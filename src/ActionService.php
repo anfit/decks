@@ -105,7 +105,7 @@ final class ActionService
         $zones->execute(['session' => $sessionId]);
         $zoneProjection = [];
         foreach ($zones as $zone) $zoneProjection[] = ['id' => (string) $zone['id'], 'name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR)];
-        $cards = $database->prepare('SELECT id, location_type, deck_id, pile_id, hand_participant_id, card_definition_id, x, y, rotation, z_index, face_state, owner_user_id, version FROM session_cards WHERE session_id = :session');
+        $cards = $database->prepare('SELECT c.id, c.location_type, c.deck_id, c.pile_id, c.hand_participant_id, c.card_definition_id, d.display_name, c.x, c.y, c.rotation, c.z_index, c.face_state, c.owner_user_id, c.version FROM session_cards c LEFT JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session');
         $cards->execute(['session' => $sessionId]);
         $cardProjection = [];
         foreach ($cards as $card) {
@@ -122,7 +122,10 @@ final class ActionService
                 'x' => $card['x'] !== null ? (float) $card['x'] : null, 'y' => $card['y'] !== null ? (float) $card['y'] : null,
                 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'version' => (int) $card['version'],
             ];
-            if ($isOwnHand || $isOwnPrivateTable || $isPublicFaceUp) $projected['card_definition_id'] = (string) $card['card_definition_id'];
+            if ($isOwnHand || $isOwnPrivateTable || $isPublicFaceUp) {
+                $projected['card_definition_id'] = (string) $card['card_definition_id'];
+                if ($card['display_name'] !== null && trim((string) $card['display_name']) !== '') $projected['card_label'] = trim((string) $card['display_name']);
+            }
             $cardProjection[] = $projected;
         }
         return [
