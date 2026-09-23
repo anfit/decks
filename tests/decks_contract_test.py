@@ -590,6 +590,10 @@ class DecksContractTest(unittest.TestCase):
         start_fpm = entrypoint.index('exec "$php_fpm_bin"')
         self.assertLess(lint, migrate)
         self.assertLess(migrate, start_fpm)
+        self.assertIn('lint_output="$(php -l "$php_file" 2>&1)"', entrypoint)
+        for diagnostic in ('"Warning:"', '"Deprecated:"', '"Notice:"', '"Parse error:"', '"Fatal error:"'):
+            self.assertIn(diagnostic, entrypoint)
+        self.assertLess(entrypoint.index("PHP lint reported a diagnostic"), migrate)
         self.assertIn("$pdo->beginTransaction()", migration)
         self.assertIn("Migration checksum changed", migration)
         self.assertNotIn("use PDO;", migration)

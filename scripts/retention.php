@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
-use PDO;
-use RuntimeException;
-
 $apply = in_array('--apply', $argv, true);
 $json = in_array('--json', $argv, true);
 if ($apply && getenv('DECKS_RETENTION_CONFIRM') !== 'apply') {

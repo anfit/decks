@@ -9,7 +9,14 @@ set -euo pipefail
 
 command -v php >/dev/null 2>&1 || { echo 'PHP CLI is not installed.' >&2; exit 1; }
 for php_file in src/*.php public/*.php scripts/*.php; do
-  php -l "$php_file" >/dev/null
+  if ! lint_output="$(php -l "$php_file" 2>&1)"; then
+    printf 'PHP lint failed for %s:\n%s\n' "$php_file" "$lint_output" >&2
+    exit 1
+  fi
+  if [[ "$lint_output" == *"Warning:"* || "$lint_output" == *"Deprecated:"* || "$lint_output" == *"Notice:"* || "$lint_output" == *"Parse error:"* || "$lint_output" == *"Fatal error:"* ]]; then
+    printf 'PHP lint reported a diagnostic for %s:\n%s\n' "$php_file" "$lint_output" >&2
+    exit 1
+  fi
 done
 php scripts/migrate.php
 
