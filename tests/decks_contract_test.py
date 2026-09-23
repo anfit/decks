@@ -21,7 +21,7 @@ class DecksContractTest(unittest.TestCase):
 
     def test_registry_contains_atomic_deck_pile_reset_and_zone_families(self) -> None:
         source = read_text("src/ActionService.php")
-        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'return_to_source_decks'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'merge_pile_top'", "'merge_pile_bottom'", "'merge_pile_shuffle'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
+        for action in ("'deal'", "'cut_deck'", "'insert_cards'", "'return_to_source_decks'", "'split_deck'", "'reverse_pile'", "'flip_pile'", "'spread_pile'", "'draw_pile_top'", "'draw_pile_bottom'", "'split_pile'", "'merge_piles'", "'merge_pile_top'", "'merge_pile_bottom'", "'merge_pile_shuffle'", "'collect_spread'", "'move_pile'", "'rotate_pile'", "'label_pile'", "'lock_pile'", "'rotate_card'", "'collect_all'", "'reset_session'", "'create_zone'", "'update_zone'", "'delete_zone'", "'configure_table'", "'remove_card'", "'restore_card'", "'lock_card'", "'move_cards'", "'reorder_hand'", "'give_cards'", "'peek_card'", "'transfer_host'", "'remove_participant'", "'restore_participant'"):
             self.assertIn(action, source)
 
     def test_mats_presets_and_private_zone_effects_are_authorized(self) -> None:
@@ -62,6 +62,27 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Overlapping zones have conflicting effects", card_source)
         zone_source = read_text("src/ZoneService.php")
         self.assertIn("['none', 'face_up', 'face_down', 'stack', 'align', 'fan', 'owner_private']", zone_source)
+
+    def test_zone_editor_is_visual_host_only_and_frozen_outside_lobby(self) -> None:
+        action = read_text("src/ActionService.php")
+        zone = read_text("src/ZoneService.php")
+        frontend = read_text("frontend/src/main.ts")
+        styles = read_text("frontend/src/styles.css")
+        spec = read_text("spec/08-presets-zones.md")
+        self.assertIn("'create_zone', 'update_zone', 'delete_zone' => 'zone.manage'", action)
+        self.assertIn("!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision'])", action)
+        self.assertIn("'update_zone' => ZoneService::update", action)
+        self.assertIn("public static function update(PDO", zone)
+        self.assertIn("!SessionService::hasCapability($member, 'zone.manage')", zone)
+        self.assertIn("Zones can only be changed while the table is in the lobby.", zone)
+        self.assertIn("Zone configuration mutations are allowed only while the session is in the lobby", spec)
+        self.assertIn('state.session.status !== "lobby" || !currentCan("zone.manage")', frontend)
+        self.assertIn('"create_zone"', frontend)
+        self.assertIn('"update_zone"', frontend)
+        self.assertIn('"delete_zone"', frontend)
+        self.assertIn("function renderZoneOverlay(zone: Zone)", frontend)
+        self.assertIn("pointer-events: none", styles)
+        self.assertIn("`fan` additionally accepts degrees from 1 through 180", spec)
 
     def test_frontend_action_history_uses_safe_descriptions_and_bounded_changes(self) -> None:
         frontend = read_text("frontend/src/main.ts")

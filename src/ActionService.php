@@ -41,6 +41,9 @@ final class ActionService
                 return ['status' => (string) $prior['status'], 'revision' => (int) $prior['revision'], 'result' => json_decode((string) $prior['result'], true, 512, JSON_THROW_ON_ERROR), 'duplicate' => true];
             }
             if ($session['status'] === 'ended' && !in_array($type, ['leave_session', 'reset_session'], true)) throw new RuntimeException('Session has ended.');
+            if (in_array($type, ['create_zone', 'update_zone', 'delete_zone'], true) && (!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision']))) {
+                throw new RuntimeException('Expected session revision is required for zone changes.');
+            }
             if (array_key_exists('expected_session_revision', $request) && $request['expected_session_revision'] !== null && (int) $request['expected_session_revision'] !== (int) $session['revision']) {
                 throw new RuntimeException('Session changed; refresh and try again.');
             }
@@ -194,7 +197,7 @@ final class ActionService
             'leave_session' => null,
             'start_session', 'end_session', 'reset_session', 'collect_all', 'configure_table', 'instantiate_deck' => 'session.manage',
             'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities' => 'participant.manage',
-            'create_zone', 'delete_zone' => 'zone.manage',
+            'create_zone', 'update_zone', 'delete_zone' => 'zone.manage',
             'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
             'move_card', 'move_cards', 'rotate_card', 'rotate_cards', 'set_cards_face', 'reorder_cards', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
             'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => 'pile.manage',
@@ -274,6 +277,7 @@ final class ActionService
             'collect_all' => self::collectAll($database, $session, $member, $payload),
             'reset_session' => self::resetSession($database, $session, $member, $payload),
             'create_zone' => ZoneService::create($database, $session, $member, $payload),
+            'update_zone' => ZoneService::update($database, $session, $member, $payload),
             'delete_zone' => ZoneService::delete($database, $session, $member, $payload),
             'configure_table' => self::configureTable($database, $session, $member, $user, $payload),
             default => throw new RuntimeException('Unsupported action type.'),

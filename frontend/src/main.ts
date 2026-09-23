@@ -12,7 +12,8 @@ type ActionEvent = { revision: number; action_type: string; actor: "you" | "part
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
 type RemovedParticipant = { id: string; role: string };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[]; removed_cards?: Array<{ id: string; version: number }>; removed_participants?: RemovedParticipant[] };
+type Zone = { id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: { effect?: string; degrees?: number } };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Zone[]; cards: Card[]; removed_cards?: Array<{ id: string; version: number }>; removed_participants?: RemovedParticipant[] };
 const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
   { key: "zone.manage", label: "Zone administration" }, { key: "deck.manage", label: "Deck actions" },
@@ -498,6 +499,63 @@ function renderRemovedCardControls(state: State): HTMLElement | null {
   return panel;
 }
 
+function renderZoneEditor(state: State): HTMLElement | null {
+  const current = state.participants.find((participant) => participant.is_current);
+  if (!current || current.role !== "host" || state.session.status !== "lobby" || !currentCan("zone.manage")) return null;
+  const panel = document.createElement("section"); panel.className = "panel zone-editor";
+  const heading = document.createElement("h3"); heading.textContent = "Table zones"; panel.append(heading);
+  const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Zones affect future card placements. Starting the session freezes zone settings."; panel.append(hint);
+  const effects = ["none", "face_up", "face_down", "stack", "align", "fan", "owner_private"];
+  const makeFields = (zone?: Zone) => {
+    const fields = document.createElement("div"); fields.className = "zone-fields";
+    const name = document.createElement("input"); name.type = "text"; name.maxLength = 160; name.value = zone?.name ?? "";
+    const x = document.createElement("input"); x.type = "number"; x.min = "-1000000"; x.max = "1000000"; x.step = "any"; x.value = String(zone?.geometry.x ?? 80);
+    const y = document.createElement("input"); y.type = "number"; y.min = "-1000000"; y.max = "1000000"; y.step = "any"; y.value = String(zone?.geometry.y ?? 80);
+    const width = document.createElement("input"); width.type = "number"; width.min = "0.01"; width.max = "1000000"; width.step = "any"; width.value = String(zone?.geometry.width ?? 220);
+    const height = document.createElement("input"); height.type = "number"; height.min = "0.01"; height.max = "1000000"; height.step = "any"; height.value = String(zone?.geometry.height ?? 120);
+    const priority = document.createElement("input"); priority.type = "number"; priority.min = "-1000000"; priority.max = "1000000"; priority.step = "1"; priority.value = String(zone?.priority ?? 0);
+    const effect = document.createElement("select");
+    for (const value of effects) { const option = document.createElement("option"); option.value = value; option.textContent = value.replaceAll("_", " "); effect.append(option); }
+    effect.value = effects.includes(zone?.behavior.effect ?? "none") ? zone?.behavior.effect ?? "none" : "none";
+    const degrees = document.createElement("input"); degrees.type = "number"; degrees.min = "1"; degrees.max = "180"; degrees.step = "1"; degrees.value = String(zone?.behavior.degrees ?? 45);
+    const degreeLabel = labelled("Fan degrees", degrees); degreeLabel.hidden = effect.value !== "fan";
+    effect.addEventListener("change", () => { degreeLabel.hidden = effect.value !== "fan"; });
+    fields.append(labelled("Zone name", name), labelled("X", x), labelled("Y", y), labelled("Width", width), labelled("Height", height), labelled("Priority", priority), labelled("Drop effect", effect), degreeLabel);
+    return { fields, name, x, y, width, height, priority, effect, degrees };
+  };
+  const payload = (fields: ReturnType<typeof makeFields>): Record<string, unknown> | null => {
+    const geometry = { x: fields.x.valueAsNumber, y: fields.y.valueAsNumber, width: fields.width.valueAsNumber, height: fields.height.valueAsNumber };
+    const priority = fields.priority.valueAsNumber;
+    if (!fields.name.value.trim() || !Object.values(geometry).every(Number.isFinite) || geometry.width <= 0 || geometry.height <= 0 || !Number.isInteger(priority) || priority < -1000000 || priority > 1000000) {
+      setStatus("Enter a name, positive rectangle size, and valid zone coordinates and priority.", "error"); return null;
+    }
+    if (Object.values(geometry).some((value) => Math.abs(value) > 1000000)) { setStatus("Zone coordinates and dimensions must be within 1,000,000.", "error"); return null; }
+    const behavior: Record<string, unknown> = { effect: fields.effect.value };
+    if (fields.effect.value === "fan") {
+      const degrees = fields.degrees.valueAsNumber;
+      if (!Number.isInteger(degrees) || degrees < 1 || degrees > 180) { setStatus("Fan degrees must be between 1 and 180.", "error"); return null; }
+      behavior.degrees = degrees;
+    }
+    return { name: fields.name.value.trim(), geometry, priority, behavior };
+  };
+
+  const createHeading = document.createElement("h4"); createHeading.textContent = "Add a zone"; panel.append(createHeading);
+  const newFields = makeFields(); panel.append(newFields.fields);
+  panel.append(button("Add zone", () => { const values = payload(newFields); if (values) void action(state.session.id, "create_zone", values); }));
+  if (state.zones.length > 0) {
+    const listHeading = document.createElement("h4"); listHeading.textContent = "Edit existing zones"; panel.append(listHeading);
+    for (const zone of state.zones) {
+      const row = document.createElement("fieldset"); row.className = "zone-row";
+      const legend = document.createElement("legend"); legend.textContent = zone.name; row.append(legend);
+      const fields = makeFields(zone); row.append(fields.fields);
+      row.append(button("Save zone", () => { const values = payload(fields); if (values) void action(state.session.id, "update_zone", { zone_id: zone.id, ...values }); }, true));
+      row.append(button("Delete zone", () => { if (window.confirm(`Delete the “${zone.name}” zone?`)) void action(state.session.id, "delete_zone", { zone_id: zone.id }); }, true));
+      panel.append(row);
+    }
+  }
+  return panel;
+}
+
 function renderDeckControls(state: State, deck: Deck): HTMLElement {
   const panel = document.createElement("section"); panel.className = "panel deck-controls";
   const heading = document.createElement("h3"); heading.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; panel.append(heading);
@@ -561,6 +619,7 @@ function renderTable(state: State): void {
   workspace.append(players);
   const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
+  const zoneEditor = renderZoneEditor(state); if (zoneEditor) workspace.append(zoneEditor);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
@@ -630,6 +689,16 @@ function renderTable(state: State): void {
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);
 }
 
+function renderZoneOverlay(zone: Zone): HTMLElement {
+  const overlay = document.createElement("div"); overlay.className = "table-zone";
+  overlay.setAttribute("role", "img"); overlay.setAttribute("aria-label", `${zone.name} zone, ${zone.behavior.effect ?? "none"} effect`);
+  overlay.style.left = `${zone.geometry.x}px`; overlay.style.top = `${zone.geometry.y}px`;
+  overlay.style.width = `${zone.geometry.width}px`; overlay.style.height = `${zone.geometry.height}px`;
+  overlay.style.zIndex = "0";
+  const label = document.createElement("span"); label.textContent = `${zone.name} · ${zone.behavior.effect ?? "none"}`; overlay.append(label);
+  return overlay;
+}
+
 function renderBoard(state: State): void {
   if (!workspace) return;
   const board = document.createElement("section");
@@ -641,6 +710,7 @@ function renderBoard(state: State): void {
   if (cards.length === 0 && state.containers.piles.length === 0) {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; surface.append(empty);
   }
+  state.zones.forEach((zone) => surface.append(renderZoneOverlay(zone)));
   const canManageCards = currentCan("card.manage");
   const canManagePiles = currentCan("pile.manage");
   state.containers.piles.forEach((pile) => surface.append(renderPile(state, pile, canManagePiles)));
