@@ -11,7 +11,8 @@ type Card = { id: string; location_type: string; deck_id: string | null; pile_id
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[]; removed_cards?: Array<{ id: string; version: number }> };
+type RemovedParticipant = { id: string; role: string };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[]; removed_cards?: Array<{ id: string; version: number }>; removed_participants?: RemovedParticipant[] };
 const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
   { key: "zone.manage", label: "Zone administration" }, { key: "deck.manage", label: "Deck actions" },
@@ -424,16 +425,16 @@ function alignSelectedCards(axis: "x" | "y"): void {
   submitSelectedPositions(cards, positions.map((position) => axis === "x" ? { ...position, x: aligned } : { ...position, y: aligned }));
 }
 
-function renderCapabilityControls(state: State): HTMLElement | null {
+function renderParticipantControls(state: State): HTMLElement | null {
   const current = state.participants.find((participant) => participant.is_current);
-  if (!current || current.role !== "host" || !currentCan("participant.manage")) return null;
+  if (!current || current.role !== "host" || state.session.status === "ended" || !currentCan("participant.manage")) return null;
   const panel = document.createElement("section"); panel.className = "panel capability-panel";
-  const heading = document.createElement("h3"); heading.textContent = "Participant capabilities"; panel.append(heading);
-  const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Explicit choices override the role defaults."; panel.append(hint);
-  for (const participant of state.participants) {
-    if (participant.is_current) continue;
+  const heading = document.createElement("h3"); heading.textContent = "Participant administration"; panel.append(heading);
+  const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Participant labels are generic. Explicit permission choices override role defaults."; panel.append(hint);
+  const active = state.participants.filter((participant) => !participant.is_current);
+  for (const [index, participant] of active.entries()) {
     const row = document.createElement("fieldset"); row.className = "capability-row";
-    const legend = document.createElement("legend"); legend.textContent = `${participant.is_current ? "You" : "Participant"} · ${participant.role}`; row.append(legend);
+    const legend = document.createElement("legend"); legend.textContent = `Participant ${index + 1} · ${participant.role}`; row.append(legend);
     for (const capability of CAPABILITIES) {
       const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = effectiveCapability(participant, capability.key);
       checkbox.addEventListener("change", () => {
@@ -443,7 +444,33 @@ function renderCapabilityControls(state: State): HTMLElement | null {
       });
       row.append(labelled(capability.label, checkbox));
     }
+    if (participant.role !== "host") {
+      row.append(button("Transfer host role", () => {
+        if (window.confirm(`Transfer the host role to Participant ${index + 1}? You will become a player.`)) void action(state.session.id, "transfer_host", { participant_id: participant.id });
+      }, true));
+      row.append(button("Remove participant", () => {
+        if (window.confirm(`Remove Participant ${index + 1} from this table? They will lose access until restored.`)) void action(state.session.id, "remove_participant", { participant_id: participant.id });
+      }, true));
+    }
     panel.append(row);
+  }
+  if (active.length === 0) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "No other active participants."; panel.append(empty); }
+
+  const removed = state.removed_participants ?? [];
+  if (removed.length > 0) {
+    const subheading = document.createElement("h4"); subheading.textContent = `Removed participants (${removed.length})`; panel.append(subheading);
+    const restoreRole = document.createElement("select"); restoreRole.setAttribute("aria-label", "Role for restored participants");
+    for (const [value, text] of [["player", "Player"], ["spectator", "Spectator"]] as const) {
+      const option = document.createElement("option"); option.value = value; option.textContent = text; restoreRole.append(option);
+    }
+    panel.append(labelled("Restore as", restoreRole));
+    const list = document.createElement("ul"); list.className = "removed-card-list";
+    for (const [index, participant] of removed.entries()) {
+      const row = document.createElement("li"); row.append(document.createTextNode(`Removed participant ${index + 1} · formerly ${participant.role}`));
+      row.append(button("Restore participant", () => void action(state.session.id, "restore_participant", { participant_id: participant.id, role: restoreRole.value }), true));
+      list.append(row);
+    }
+    panel.append(list);
   }
   return panel;
 }
@@ -532,7 +559,7 @@ function renderTable(state: State): void {
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
-  const capabilityPanel = renderCapabilityControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
+  const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));

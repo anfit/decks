@@ -226,8 +226,8 @@ final class SessionService
         $target->execute(['session' => $session['id'], 'id' => $targetId]);
         $row = $target->fetch();
         if (!is_array($row)) throw new RuntimeException('Host transfer target is invalid.');
-        $database->prepare("UPDATE session_participants SET role = 'player' WHERE session_id = :session AND role = 'host'")->execute(['session' => $session['id']]);
-        $database->prepare("UPDATE session_participants SET role = 'host' WHERE session_id = :session AND id = :target")->execute(['session' => $session['id'], 'target' => $targetId]);
+        $database->prepare("UPDATE session_participants SET role = 'player', capabilities = '{}'::jsonb WHERE session_id = :session AND role = 'host'")->execute(['session' => $session['id']]);
+        $database->prepare("UPDATE session_participants SET role = 'host', capabilities = '{}'::jsonb WHERE session_id = :session AND id = :target")->execute(['session' => $session['id'], 'target' => $targetId]);
         $database->prepare('INSERT INTO session_hands(session_id, participant_id) VALUES (:session, :participant) ON CONFLICT DO NOTHING')->execute(['session' => $session['id'], 'participant' => $targetId]);
         $database->prepare('UPDATE sessions SET host_user_id = :user WHERE id = :session')->execute(['user' => $row['user_id'], 'session' => $session['id']]);
         Security::audit($database, (string) $member['user_id'], 'session.host_transferred', 'session_participant', $targetId, ['session_id' => (string) $session['id']]);

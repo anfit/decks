@@ -206,7 +206,7 @@ class DecksContractTest(unittest.TestCase):
         styles = read_text("frontend/src/styles.css")
         self.assertIn("$isCurrent || ($member['role'] ?? '') === 'host'", action)
         self.assertIn("use ($userId, $handCounts, $member)", action)
-        self.assertIn("Participant capabilities", frontend)
+        self.assertIn("Participant administration", frontend)
         self.assertIn("set_participant_capabilities", frontend)
         self.assertIn("currentCan(\"deck.manage\")", frontend)
         self.assertIn("currentCan(\"pile.manage\")", frontend)
@@ -272,6 +272,29 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Remove the selected card from play? The host can restore it later.", frontend)
         self.assertIn('"restore_card", { card_id: removed.id, expected_card_version: removed.version, position: position.value }', frontend)
         self.assertIn("never presents the card definition/name, protected asset path, source-deck association, or removed-card ordering", spec)
+
+    def test_host_participant_controls_use_generic_host_only_recovery_projection(self) -> None:
+        action = read_text("src/ActionService.php")
+        session = read_text("src/SessionService.php")
+        frontend = read_text("frontend/src/main.ts")
+        ui_spec = read_text("spec/15-session-setup-and-capabilities.md")
+        self.assertIn("$member['role'] ?? '') === 'host' && SessionService::hasCapability($member, 'participant.manage')", action)
+        self.assertIn("SELECT id, role FROM session_participants WHERE session_id = :session AND removed_at IS NOT NULL AND role <> 'host'", action)
+        self.assertIn("'removed_participants' => $removedParticipantProjection", action)
+        self.assertIn("$removedParticipantProjection = []", action)
+        self.assertIn("role = 'player', capabilities = '{}'::jsonb", session)
+        self.assertIn("role = 'host', capabilities = '{}'::jsonb", session)
+        self.assertIn('state.session.status === "ended" || !currentCan("participant.manage")', frontend)
+        for action_type in ("transfer_host", "remove_participant", "restore_participant"):
+            self.assertIn(f'"{action_type}"', frontend)
+        self.assertIn("Transfer the host role to Participant", frontend)
+        self.assertIn("Remove Participant", frontend)
+        self.assertIn("Removed participants", frontend)
+        self.assertIn("Removed participant", frontend)
+        self.assertIn("restoreRole.value", frontend)
+        self.assertIn("must not show participant IDs, account emails, invite credentials, or hand card identities", ui_spec)
+        self.assertIn("all other participants receive an empty list", ui_spec)
+        self.assertIn("clears explicit capability overrides for both participants", ui_spec)
 
     def test_return_selection_resolves_source_decks_without_projecting_associations(self) -> None:
         frontend = read_text("frontend/src/main.ts")

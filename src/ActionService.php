@@ -149,6 +149,12 @@ final class ActionService
             $removedCards->execute(['session' => $sessionId]);
             foreach ($removedCards as $removedCard) $removedCardProjection[] = ['id' => (string) $removedCard['id'], 'version' => (int) $removedCard['version']];
         }
+        $removedParticipantProjection = [];
+        if (($member['role'] ?? '') === 'host' && SessionService::hasCapability($member, 'participant.manage')) {
+            $removedParticipants = $database->prepare("SELECT id, role FROM session_participants WHERE session_id = :session AND removed_at IS NOT NULL AND role <> 'host' ORDER BY removed_at, id");
+            $removedParticipants->execute(['session' => $sessionId]);
+            foreach ($removedParticipants as $removedParticipant) $removedParticipantProjection[] = ['id' => (string) $removedParticipant['id'], 'role' => (string) $removedParticipant['role']];
+        }
         return [
             'revision' => (int) $session['revision'],
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
@@ -163,6 +169,7 @@ final class ActionService
             'zones' => $zoneProjection,
             'cards' => $cardProjection,
             'removed_cards' => $removedCardProjection,
+            'removed_participants' => $removedParticipantProjection,
         ];
     }
 
