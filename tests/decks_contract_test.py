@@ -588,6 +588,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertLess(entrypoint.index("php scripts/migrate.php"), entrypoint.index('exec "$php_fpm_bin"'))
         self.assertIn("$pdo->beginTransaction()", migration)
         self.assertIn("Migration checksum changed", migration)
+        self.assertNotIn("use PDO;", migration)
         self.assertIn("before starting FPM", spec)
 
 

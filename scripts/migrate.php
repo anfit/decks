@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
-use PDO;
-
 $directory = dirname(__DIR__) . '/migrations';
 $files = glob($directory . '/*.sql') ?: [];
 sort($files, SORT_STRING);
