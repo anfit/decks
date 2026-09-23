@@ -180,11 +180,12 @@ final class CardService
 
     public static function lock(PDO $database, array $session, array $member, array $payload, bool $locked): array
     {
-        self::assertPlayer($session, $member); $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? '')); self::assertVersion($card, $payload);
-        self::assertCanControl($card, $member);
-        self::assertSourcePileUnlocked($database, (string) $session['id'], $card, $member);
+        self::assertPlayer($session, $member);
+        $card = self::card($database, $session['id'], (string) ($payload['card_id'] ?? ''));
+        if (!array_key_exists('expected_card_version', $payload) || filter_var($payload['expected_card_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected card version is required.');
+        self::assertVersion($card, $payload);
+        self::assertCanControl($card, $member, true);
         if ($locked && $card['locked_by'] !== null && (string)$card['locked_by'] !== (string)$member['user_id']) throw new RuntimeException('That card is locked.');
-        if (!$locked && $card['locked_by'] !== null && (string)$card['locked_by'] !== (string)$member['user_id']) throw new RuntimeException('Only the card owner can unlock it.');
         $database->prepare('UPDATE session_cards SET locked_by=:owner, version=version+1 WHERE id=:id')->execute(['owner'=>$locked?$member['user_id']:null,'id'=>$card['id']]);
         return ['card_id'=>(string)$card['id'],'locked'=>$locked];
     }
@@ -529,12 +530,12 @@ final class CardService
         if (isset($payload['expected_card_version']) && (int) $payload['expected_card_version'] !== (int) $card['version']) throw new RuntimeException('Card changed; refresh and try again.');
     }
 
-    private static function assertCanControl(array $card, array $member): void
+    private static function assertCanControl(array $card, array $member, bool $allowForeignCardLock = false): void
     {
         if ($card['location_type'] === 'hand' && (string) $card['hand_participant_id'] !== (string) $member['id']) throw new RuntimeException('That hand is private.');
         if ($card['location_type'] === 'pile' && $card['face_state'] === 'private') throw new RuntimeException('That pile card is private.');
         if ($card['location_type'] === 'table' && $card['face_state'] === 'private' && (string) $card['owner_user_id'] !== (string) $member['user_id']) throw new RuntimeException('That table card is private.');
-        if ($card['locked_by'] !== null && (string) $card['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.');
+        if (!$allowForeignCardLock && $card['locked_by'] !== null && (string) $card['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('That card is locked.');
         if ($card['location_type'] === 'removed') throw new RuntimeException('That card is removed from play.');
     }
 

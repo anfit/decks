@@ -88,6 +88,7 @@ final class SessionService
             if (!is_array($session) || !Token::matches($parts['secret'], (string) $session['join_secret_hash']) || $session['status'] === 'ended') {
                 throw new RuntimeException('This table invitation is invalid or expired.');
             }
+            if ($session['locked_by'] !== null && (string) $session['locked_by'] !== (string) $user['id']) throw new RuntimeException('This table is locked and cannot accept participants right now.');
             if ($expectedSessionId !== null && (string) $session['id'] !== $expectedSessionId) throw new RuntimeException('This table invitation belongs to another table.');
             $existing = $database->prepare('SELECT * FROM session_participants WHERE session_id = :session AND user_id = :user FOR UPDATE');
             $existing->execute(['session' => $session['id'], 'user' => $user['id']]);

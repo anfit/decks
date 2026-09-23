@@ -186,8 +186,8 @@ final class PileService
     public static function lock(PDO $database, array $session, array $member, array $payload, bool $locked): array
     {
         self::assertPlayer($session, $member); $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
-        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
-        if (!$locked && $pile['locked_by'] !== null && (string) $pile['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('Pile is locked by another participant.');
+        if (!array_key_exists('expected_pile_version', $payload) || filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected pile version is required.');
+        if ((int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         if ($locked && $pile['locked_by'] !== null && (string) $pile['locked_by'] !== (string) $member['user_id']) throw new RuntimeException('Pile is locked by another participant.');
         $database->prepare('UPDATE session_piles SET locked_by=:owner, version=version+1 WHERE id=:id')->execute(['owner' => $locked ? $member['user_id'] : null, 'id' => $pile['id']]);
         return ['pile_id' => (string) $pile['id'], 'locked' => $locked];

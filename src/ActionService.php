@@ -29,6 +29,7 @@ final class ActionService
             foreach (self::requiredCapabilities($type, $payload) as $requiredCapability) {
                 if (!SessionService::hasCapability($member, $requiredCapability)) throw new RuntimeException('This participant is not allowed to perform that action.');
             }
+            LockService::assertActionAllowed($database, $session, $member, $type, $payload);
             $duplicate = $database->prepare(
                 'SELECT request_hash, status, revision, result FROM processed_actions
                  WHERE session_id = :session AND actor_user_id = :actor AND action_id = :action',
@@ -41,8 +42,8 @@ final class ActionService
                 return ['status' => (string) $prior['status'], 'revision' => (int) $prior['revision'], 'result' => json_decode((string) $prior['result'], true, 512, JSON_THROW_ON_ERROR), 'duplicate' => true];
             }
             if ($session['status'] === 'ended' && !in_array($type, ['leave_session', 'reset_session'], true)) throw new RuntimeException('Session has ended.');
-            if (in_array($type, ['create_zone', 'update_zone', 'delete_zone'], true) && (!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision']))) {
-                throw new RuntimeException('Expected session revision is required for zone changes.');
+            if (in_array($type, ['create_zone', 'update_zone', 'delete_zone', 'lock_zone', 'unlock_zone', 'lock_table', 'unlock_table'], true) && (!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision']))) {
+                throw new RuntimeException('Expected session revision is required for zone and table lock changes.');
             }
             if (array_key_exists('expected_session_revision', $request) && $request['expected_session_revision'] !== null && (int) $request['expected_session_revision'] !== (int) $session['revision']) {
                 throw new RuntimeException('Session changed; refresh and try again.');
@@ -75,7 +76,7 @@ final class ActionService
     {
         $member = SessionService::membership($database, $sessionId, $userId);
         if ($member === null) throw new RuntimeException('Active table membership required.');
-        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at, access_settings FROM sessions WHERE id = :id');
+        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at, access_settings, locked_by FROM sessions WHERE id = :id');
         $sessionStatement->execute(['id' => $sessionId]);
         $session = $sessionStatement->fetch();
         if (!is_array($session)) throw new RuntimeException('Session not found.');
@@ -100,29 +101,29 @@ final class ActionService
             $containerProjection[$type === 'deck' ? 'decks' : 'piles'][] = ['id' => $id, 'card_count' => (int) $container['card_count']];
         }
         $decks = $database->prepare(
-            "SELECT d.id, d.label, d.version, count(c.id) AS card_count
+            "SELECT d.id, d.label, d.version, d.locked_by, count(c.id) AS card_count
              FROM session_decks d
              LEFT JOIN session_cards c ON c.session_id = d.session_id AND c.location_type = 'deck' AND c.deck_id = d.id
              WHERE d.session_id = :session
-             GROUP BY d.id, d.label, d.version
+             GROUP BY d.id, d.label, d.version, d.locked_by
              ORDER BY d.created_at, d.id",
         );
         $decks->execute(['session' => $sessionId]);
         $containerProjection['decks'] = [];
-        foreach ($decks as $deck) $containerProjection['decks'][] = ['id' => (string) $deck['id'], 'label' => $deck['label'] !== null ? (string) $deck['label'] : null, 'card_count' => (int) $deck['card_count'], 'version' => (int) $deck['version']];
+        foreach ($decks as $deck) $containerProjection['decks'][] = ['id' => (string) $deck['id'], 'label' => $deck['label'] !== null ? (string) $deck['label'] : null, 'card_count' => (int) $deck['card_count'], 'version' => (int) $deck['version'], 'locked' => $deck['locked_by'] !== null, 'locked_by_current' => $deck['locked_by'] !== null && (string) $deck['locked_by'] === $userId];
         $pileMeta = $database->prepare('SELECT id, label, x, y, rotation, z_index, locked_by, version FROM session_piles WHERE session_id = :session ORDER BY z_index, id');
         $pileMeta->execute(['session' => $sessionId]);
         $pileById = [];
         foreach ($pileMeta as $pile) {
-            $pileById[(string) $pile['id']] = ['id' => (string) $pile['id'], 'card_count' => 0, 'label' => $pile['label'] !== null ? (string) $pile['label'] : null, 'x' => (float) $pile['x'], 'y' => (float) $pile['y'], 'rotation' => (float) $pile['rotation'], 'z_index' => (int) $pile['z_index'], 'locked' => $pile['locked_by'] !== null, 'version' => (int) $pile['version']];
+            $pileById[(string) $pile['id']] = ['id' => (string) $pile['id'], 'card_count' => 0, 'label' => $pile['label'] !== null ? (string) $pile['label'] : null, 'x' => (float) $pile['x'], 'y' => (float) $pile['y'], 'rotation' => (float) $pile['rotation'], 'z_index' => (int) $pile['z_index'], 'locked' => $pile['locked_by'] !== null, 'locked_by_current' => $pile['locked_by'] !== null && (string) $pile['locked_by'] === $userId, 'version' => (int) $pile['version']];
         }
         foreach ($containerProjection['piles'] as $pile) if (isset($pileById[$pile['id']])) $pileById[$pile['id']]['card_count'] = $pile['card_count'];
         $containerProjection['piles'] = array_values($pileById);
-        $zones = $database->prepare('SELECT id, name, geometry, priority, behavior FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
+        $zones = $database->prepare('SELECT id, name, geometry, priority, behavior, locked_by FROM session_zones WHERE session_id = :session ORDER BY priority DESC, id');
         $zones->execute(['session' => $sessionId]);
         $zoneProjection = [];
-        foreach ($zones as $zone) $zoneProjection[] = ['id' => (string) $zone['id'], 'name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR)];
-        $cards = $database->prepare('SELECT c.id, c.location_type, c.deck_id, c.pile_id, c.hand_participant_id, c.card_definition_id, d.display_name, c.x, c.y, c.rotation, c.z_index, c.order_key, c.face_state, c.owner_user_id, c.version FROM session_cards c LEFT JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session');
+        foreach ($zones as $zone) $zoneProjection[] = ['id' => (string) $zone['id'], 'name' => (string) $zone['name'], 'geometry' => json_decode((string) $zone['geometry'], true, 512, JSON_THROW_ON_ERROR), 'priority' => (int) $zone['priority'], 'behavior' => json_decode((string) $zone['behavior'], true, 512, JSON_THROW_ON_ERROR), 'locked' => $zone['locked_by'] !== null, 'locked_by_current' => $zone['locked_by'] !== null && (string) $zone['locked_by'] === $userId];
+        $cards = $database->prepare('SELECT c.id, c.location_type, c.deck_id, c.pile_id, c.hand_participant_id, c.card_definition_id, d.display_name, c.x, c.y, c.rotation, c.z_index, c.order_key, c.face_state, c.owner_user_id, c.locked_by, c.version FROM session_cards c LEFT JOIN card_definitions d ON d.id = c.card_definition_id WHERE c.session_id = :session');
         $cards->execute(['session' => $sessionId]);
         $cardProjection = [];
         foreach ($cards as $card) {
@@ -138,6 +139,7 @@ final class ActionService
                 'hand_participant_id' => $isOwnHand && $card['hand_participant_id'] ? (string) $card['hand_participant_id'] : null,
                 'x' => $card['x'] !== null ? (float) $card['x'] : null, 'y' => $card['y'] !== null ? (float) $card['y'] : null,
                 'rotation' => (float) $card['rotation'], 'z_index' => (int) $card['z_index'], 'face_state' => (string) $card['face_state'], 'version' => (int) $card['version'],
+                'locked' => $card['locked_by'] !== null, 'locked_by_current' => $card['locked_by'] !== null && (string) $card['locked_by'] === $userId,
             ];
             if ($isOwnHand) $projected['hand_order'] = (int) $card['order_key'];
             if ($isOwnHand || $isOwnPrivateTable || $isPublicFaceUp) {
@@ -160,7 +162,7 @@ final class ActionService
         }
         return [
             'revision' => (int) $session['revision'],
-            'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
+            'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at'], 'locked' => $session['locked_by'] !== null, 'locked_by_current' => $session['locked_by'] !== null && (string) $session['locked_by'] === $userId],
             'configuration' => json_decode((string) $session['access_settings'], true, 512, JSON_THROW_ON_ERROR),
             'participants' => array_map(static function (array $row) use ($userId, $handCounts, $member): array {
                 $isCurrent = (string) $row['user_id'] === (string) $userId;
@@ -201,7 +203,7 @@ final class ActionService
             'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
             'move_card', 'move_cards', 'rotate_card', 'rotate_cards', 'set_cards_face', 'reorder_cards', 'flip_card', 'turn_face_up', 'turn_face_down', 'move_to_hand', 'play_from_hand', 'reorder_hand', 'give_cards', 'peek_card', 'remove_card', 'restore_card' => 'card.manage',
             'create_pile', 'move_to_pile', 'draw_pile_top', 'draw_pile_bottom', 'split_pile', 'merge_piles', 'collect_spread', 'move_pile', 'rotate_pile', 'label_pile', 'shuffle_pile', 'reverse_pile', 'flip_pile', 'spread_pile', 'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => 'pile.manage',
-            'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile' => 'lock.manage',
+            'lock_card', 'unlock_card', 'lock_pile', 'unlock_pile', 'lock_deck', 'unlock_deck', 'lock_zone', 'unlock_zone', 'lock_table', 'unlock_table' => 'lock.manage',
             'undo_action' => 'card.undo',
             default => null,
         };
@@ -215,6 +217,9 @@ final class ActionService
         $additional = match ($type) {
             'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'spread_pile', 'lock_card', 'unlock_card' => ['card.manage'],
             'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage'],
+            'lock_deck', 'unlock_deck' => ['deck.manage'],
+            'lock_zone', 'unlock_zone' => ['zone.manage'],
+            'lock_table', 'unlock_table' => ['session.manage'],
             'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => ['deck.manage'],
             default => [],
         };
@@ -269,6 +274,9 @@ final class ActionService
             'move_pile', 'rotate_pile' => PileService::updateGeometry($database, $session, $member, $payload),
             'label_pile' => PileService::label($database, $session, $member, $payload),
             'lock_pile', 'unlock_pile' => PileService::lock($database, $session, $member, $payload, $type === 'lock_pile'),
+            'lock_deck', 'unlock_deck' => LockService::change($database, $session, $member, $payload, 'deck', $type === 'lock_deck'),
+            'lock_zone', 'unlock_zone' => LockService::change($database, $session, $member, $payload, 'zone', $type === 'lock_zone'),
+            'lock_table', 'unlock_table' => LockService::change($database, $session, $member, $payload, 'table', $type === 'lock_table'),
             'shuffle_pile' => PileService::shuffle($database, $session, $member, $payload),
             'reverse_pile' => PileService::reverse($database, $session, $member, $payload, false),
             'flip_pile' => PileService::reverse($database, $session, $member, $payload, true),
@@ -338,6 +346,9 @@ final class ActionService
     private static function resetSession(PDO $database, array $session, array $member, array $payload): array
     {
         if ($member['role'] !== 'host') throw new RuntimeException('Host permission required.');
+        $database->prepare('UPDATE sessions SET locked_by = NULL WHERE id = :id')->execute(['id' => $session['id']]);
+        $database->prepare('UPDATE session_decks SET locked_by = NULL, version = version + 1 WHERE session_id = :session')->execute(['session' => $session['id']]);
+        $database->prepare('UPDATE session_zones SET locked_by = NULL, locked = false WHERE session_id = :session')->execute(['session' => $session['id']]);
         $result = self::collectAll($database, $session, $member);
         $database->prepare("UPDATE sessions SET status = 'lobby', frozen_at = NULL, ended_at = NULL WHERE id = :id")->execute(['id' => $session['id']]);
         $initial = $database->prepare('SELECT initial_state FROM sessions WHERE id = :id');
@@ -407,6 +418,7 @@ final class ActionService
         if ((int) $current['version'] !== (int) ($inverse['expected_version'] ?? -1)) throw new RuntimeException('The card changed; undo is no longer safe.');
         $previous = $inverse['previous'] ?? null;
         if (!is_array($previous)) throw new RuntimeException('Undo target is invalid.');
+        LockService::assertActionAllowed($database, $session, $member, 'move_card', ['card_id' => $cardId, 'x' => $previous['x'] ?? null, 'y' => $previous['y'] ?? null]);
         $database->prepare('UPDATE session_cards SET x=:x, y=:y, rotation=:rotation, z_index=:z, face_state=:face, owner_user_id=:owner, version=version+1 WHERE id=:id')
             ->execute(['x' => $previous['x'], 'y' => $previous['y'], 'rotation' => $previous['rotation'], 'z' => $previous['z_index'], 'face' => $previous['face_state'], 'owner' => $previous['owner_user_id'], 'id' => $cardId]);
         return ['undone_action_id' => $targetId, 'card_id' => $cardId, 'version' => (int) $current['version'] + 1];

@@ -15,7 +15,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("$card['location_type'] === 'pile' && !$isPublicFaceUp", source)
         self.assertIn("'zones' => $zoneProjection", source)
         self.assertIn("'hand_participant_id' => $isOwnHand", source)
-        self.assertIn("c.face_state, c.owner_user_id, c.version", source)
+        self.assertIn("c.face_state, c.owner_user_id, c.locked_by, c.version", source)
         self.assertIn("if ($isOwnHand) $projected['hand_order'] = (int) $card['order_key']", source)
         self.assertIn("SELECT id, geometry, priority, behavior FROM session_zones", read_text("src/CardService.php"))
 
@@ -164,7 +164,7 @@ class DecksContractTest(unittest.TestCase):
         for label in ("More pile actions", "Split top into new pile", "Merge at top", "Merge at bottom", "Collect selected cards into this pile", "Save pile label", "Reverse pile order", "Flip pile (reverse and turn cards)", "Spread pile horizontally", "Spread pile vertically"):
             self.assertIn(label, frontend)
         self.assertIn("expected_target_version: destination.version", frontend)
-        self.assertIn("candidate.id !== pile.id && !candidate.locked", frontend)
+        self.assertIn("candidate.id !== pile.id && (!candidate.locked || candidate.locked_by_current)", frontend)
         self.assertIn("function renderPile(state: State, pile: Pile, interactive: boolean)", frontend)
         for label in ("Move pile left", "Move pile right", "Move pile up", "Move pile down", "Rotate pile 15°", "Bring pile to front", "Send pile to back"):
             self.assertIn(label, frontend)
@@ -397,7 +397,7 @@ class DecksContractTest(unittest.TestCase):
         pile = read_text("src/PileService.php")
         ui_spec = read_text("spec/07-table-interaction.md")
         pile_spec = read_text("spec/16-pile-operations.md")
-        self.assertIn('const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked)', frontend)
+        self.assertIn('const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked || pile.locked_by_current)', frontend)
         self.assertIn('"Move selected hand cards into pile"', frontend)
         self.assertIn('"move_to_pile", { pile_id: pile.id, expected_pile_version: pile.version, ...selected }', frontend)
         self.assertIn("Expected card versions are required.", pile)
@@ -415,13 +415,35 @@ class DecksContractTest(unittest.TestCase):
             self.assertIn(label, frontend)
         self.assertIn("'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle'", action)
         self.assertIn("expected_deck_version: deck.version", frontend)
-        self.assertIn("SELECT d.id, d.label, d.version, count(c.id) AS card_count", action)
+        self.assertIn("SELECT d.id, d.label, d.version, d.locked_by, count(c.id) AS card_count", action)
         self.assertIn("else $database->prepare('UPDATE session_decks SET version = version + 1 WHERE id = :id')", action)
         self.assertIn("Expected pile version is required.", pile)
         self.assertIn("Expected deck version is required.", pile)
         self.assertIn("if ($position === 'shuffle')", pile)
         self.assertIn("random_int(0, $index)", pile)
         self.assertIn("`merge_pile_shuffle` | `pile.manage`, `deck.manage`", capability_spec)
+
+    def test_resource_lock_scopes_are_authorized_atomic_and_safe_to_project(self) -> None:
+        action = read_text("src/ActionService.php")
+        locks = read_text("src/LockService.php")
+        migration = read_text("migrations/006_resource_lock_scopes.sql")
+        frontend = read_text("frontend/src/main.ts")
+        capabilities = read_text("spec/19-capability-policy.md")
+        self.assertIn("ADD COLUMN locked_by", migration)
+        self.assertIn("LockService::assertActionAllowed($database, $session, $member, $type, $payload)", action)
+        self.assertLess(action.index("LockService::assertActionAllowed"), action.index("$duplicate = $database->prepare"))
+        for action_name in ("lock_deck", "unlock_deck", "lock_zone", "unlock_zone", "lock_table", "unlock_table"):
+            self.assertIn(f"'{action_name}'", action)
+            self.assertIn(f"`{action_name}`", capabilities)
+        self.assertIn("assertPointOutsideForeignLocks", locks)
+        self.assertIn("The table is locked by another participant.", locks)
+        self.assertIn("locked_by = NULL", action)
+        self.assertIn("'locked_by_current' =>", action)
+        self.assertNotIn("'locked_by' =>", action)
+        self.assertIn("This table is locked and cannot accept participants", read_text("src/SessionService.php"))
+        for label in ("Lock selected card", "Lock deck", "Lock zone", "Lock table"):
+            self.assertIn(label, frontend)
+        self.assertIn('if (currentCan("lock.manage") && currentCan("card.manage"))', frontend)
 
     def test_production_shell_contains_frontend_mount_points(self) -> None:
         source = read_text("public/index.php")

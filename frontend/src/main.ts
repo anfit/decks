@@ -1,18 +1,18 @@
 import "./styles.css";
 
 type User = { id: string; email: string; role: string };
-type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string };
+type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string; locked: boolean; locked_by_current: boolean };
 type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
-type Deck = { id: string; label: string | null; card_count: number; version: number };
-type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; version: number };
-type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number };
+type Deck = { id: string; label: string | null; card_count: number; version: number; locked: boolean; locked_by_current: boolean };
+type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; locked_by_current: boolean; version: number };
+type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number; locked: boolean; locked_by_current: boolean };
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
 type RemovedParticipant = { id: string; role: string };
-type Zone = { id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: { effect?: string; degrees?: number } };
+type Zone = { id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: { effect?: string; degrees?: number }; locked: boolean; locked_by_current: boolean };
 type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Zone[]; cards: Card[]; removed_cards?: Array<{ id: string; version: number }>; removed_participants?: RemovedParticipant[] };
 const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
@@ -35,6 +35,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   move_to_pile: "moved cards to a pile", draw_pile_top: "drew from a pile", draw_pile_bottom: "drew from a pile",
   split_pile: "split a pile", merge_piles: "merged piles", collect_spread: "collected cards into a pile", move_pile: "moved a pile",
   rotate_pile: "rotated a pile", label_pile: "changed a pile label", lock_pile: "locked a pile", unlock_pile: "unlocked a pile",
+  lock_deck: "locked a deck", unlock_deck: "unlocked a deck", lock_zone: "locked a zone", unlock_zone: "unlocked a zone", lock_table: "locked the table", unlock_table: "unlocked the table",
   shuffle_pile: "shuffled a pile", reverse_pile: "reversed a pile", flip_pile: "flipped a pile", spread_pile: "spread a pile",
   merge_pile_top: "returned a pile to a deck", merge_pile_bottom: "returned a pile to a deck", merge_pile_shuffle: "shuffled a pile into a deck", collect_all: "collected all cards",
   reset_session: "reset the table", create_zone: "created a zone", delete_zone: "removed a zone", undo_action: "undid a spatial action",
@@ -60,6 +61,7 @@ let selectionCountLabel: HTMLElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
 let alignmentActionButtons: HTMLButtonElement[] = [];
 let singleSelectionActionButtons: HTMLButtonElement[] = [];
+let cardLockSelectionButtons: HTMLButtonElement[] = [];
 const selectedHandCardIds = new Set<string>();
 let handSelectionCountLabel: HTMLElement | null = null;
 let handSelectionButtons: HTMLButtonElement[] = [];
@@ -292,7 +294,7 @@ function currentCan(capability: Capability): boolean {
 function renderPileControls(state: State, pile: Pile): HTMLElement {
   const controls = document.createElement("div"); controls.className = "pile-controls";
   const title = document.createElement("span"); title.textContent = `${pile.label || "Pile"} · ${pile.card_count} cards${pile.locked ? " · locked" : ""}`; controls.append(title);
-  const canManage = !pile.locked && currentCan("pile.manage");
+  const canManage = (!pile.locked || pile.locked_by_current) && currentCan("pile.manage");
   const canChangePileCards = canManage && currentCan("card.manage");
   if (canManage) {
     controls.append(button("Shuffle pile", () => void action(state.session.id, "shuffle_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true));
@@ -347,7 +349,7 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
       actions.append(collect);
     }
 
-    const targets = state.containers.piles.filter((candidate) => candidate.id !== pile.id && !candidate.locked);
+    const targets = state.containers.piles.filter((candidate) => candidate.id !== pile.id && (!candidate.locked || candidate.locked_by_current));
     if (targets.length > 0) {
       const target = document.createElement("select"); target.setAttribute("aria-label", "Merge into pile");
       for (const candidate of targets) {
@@ -366,14 +368,15 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
       actions.append(hint);
     }
     if (currentCan("deck.manage")) {
-      if (state.containers.decks.length > 0) {
+      const availableDecks = state.containers.decks.filter((deck) => !deck.locked || deck.locked_by_current);
+      if (availableDecks.length > 0) {
         const deckTarget = document.createElement("select"); deckTarget.setAttribute("aria-label", `Deck destination for ${pile.label || "pile"}`);
-        for (const deck of state.containers.decks) {
+        for (const deck of availableDecks) {
           const option = document.createElement("option"); option.value = deck.id; option.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; deckTarget.append(option);
         }
         actions.append(labelled("Merge pile into deck", deckTarget));
         const mergeIntoDeck = (position: "top" | "bottom" | "shuffle"): void => {
-          const deck = state.containers.decks.find((candidate) => candidate.id === deckTarget.value);
+          const deck = availableDecks.find((candidate) => candidate.id === deckTarget.value);
           if (!deck || pile.card_count === 0) return;
           const type = position === "shuffle" ? "merge_pile_shuffle" : `merge_pile_${position}`;
           void action(state.session.id, type, { pile_id: pile.id, deck_id: deck.id, expected_pile_version: pile.version, expected_deck_version: deck.version });
@@ -384,11 +387,11 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
         toTop.disabled = toBottom.disabled = shuffleIn.disabled = pile.card_count === 0;
         actions.append(toTop, toBottom, shuffleIn);
       } else {
-        const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Add a deck before returning this pile to a deck."; actions.append(hint);
+        const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = state.containers.decks.length > 0 ? "Unlock a deck before returning this pile to it." : "Add a deck before returning this pile to a deck."; actions.append(hint);
       }
     }
   } else {
-    const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = pile.locked ? "Unlock this pile before changing its contents." : "Pile actions are not available for your current permissions."; actions.append(hint);
+    const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = pile.locked && !pile.locked_by_current ? "Unlock this pile before changing its contents." : "Pile actions are not available for your current permissions."; actions.append(hint);
   }
   controls.append(advanced);
   return controls;
@@ -396,9 +399,14 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
 
 function updateSelectionUi(): void {
   if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
-  for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0;
-  for (const item of alignmentActionButtons) item.disabled = selectedCardIds.size < 2;
-  for (const item of singleSelectionActionButtons) item.disabled = selectedCardIds.size !== 1;
+  const selectedCards = selectedTableCards();
+  const selectionCanChange = selectedCards.length === selectedCardIds.size && selectedCards.every((card) => !card.locked || card.locked_by_current);
+  for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0 || !selectionCanChange;
+  for (const item of alignmentActionButtons) item.disabled = selectedCardIds.size < 2 || !selectionCanChange;
+  for (const item of singleSelectionActionButtons) item.disabled = selectedCardIds.size !== 1 || !selectionCanChange;
+  const selectedCard = selectedCards[0];
+  if (cardLockSelectionButtons[0]) cardLockSelectionButtons[0].disabled = !selectedCard || selectedCard.locked;
+  if (cardLockSelectionButtons[1]) cardLockSelectionButtons[1].disabled = !selectedCard || !selectedCard.locked;
   workspace?.querySelectorAll<HTMLElement>(".table-surface .card[data-card-id]").forEach((item) => {
     const selected = selectedCardIds.has(item.dataset.cardId ?? "");
     item.classList.toggle("selected", selected);
@@ -606,20 +614,46 @@ function renderZoneEditor(state: State): HTMLElement | null {
     const listHeading = document.createElement("h4"); listHeading.textContent = "Edit existing zones"; panel.append(listHeading);
     for (const zone of state.zones) {
       const row = document.createElement("fieldset"); row.className = "zone-row";
-      const legend = document.createElement("legend"); legend.textContent = zone.name; row.append(legend);
+      const legend = document.createElement("legend"); legend.textContent = `${zone.name}${zone.locked ? " · locked" : ""}`; row.append(legend);
       const fields = makeFields(zone); row.append(fields.fields);
-      row.append(button("Save zone", () => { const values = payload(fields); if (values) void action(state.session.id, "update_zone", { zone_id: zone.id, ...values }); }, true));
-      row.append(button("Delete zone", () => { if (window.confirm(`Delete the “${zone.name}” zone?`)) void action(state.session.id, "delete_zone", { zone_id: zone.id }); }, true));
+      const unavailable = zone.locked && !zone.locked_by_current;
+      fields.fields.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select").forEach((field) => { field.disabled = unavailable; });
+      const save = button("Save zone", () => { const values = payload(fields); if (values) void action(state.session.id, "update_zone", { zone_id: zone.id, ...values }); }, true);
+      const remove = button("Delete zone", () => { if (window.confirm(`Delete the “${zone.name}” zone?`)) void action(state.session.id, "delete_zone", { zone_id: zone.id }); }, true);
+      save.disabled = remove.disabled = unavailable;
+      if (unavailable) { const locked = document.createElement("p"); locked.className = "muted"; locked.textContent = "Unlock this zone before editing it."; row.append(locked); }
+      row.append(save, remove);
       panel.append(row);
     }
   }
   return panel;
 }
 
+function renderZoneLockControls(state: State): HTMLElement | null {
+  if (!currentCan("lock.manage") || !currentCan("zone.manage") || state.zones.length === 0 || state.session.status === "ended") return null;
+  const panel = document.createElement("section"); panel.className = "panel zone-lock-controls";
+  const heading = document.createElement("h3"); heading.textContent = "Zone locks"; panel.append(heading);
+  for (const zone of state.zones) {
+    const row = document.createElement("div"); row.className = "zone-lock-row";
+    const label = document.createElement("span"); label.textContent = `${zone.name} · ${zone.locked ? "locked" : "unlocked"}`;
+    const type = zone.locked ? "unlock_zone" : "lock_zone";
+    row.append(label, button(zone.locked ? "Unlock zone" : "Lock zone", () => void action(state.session.id, type, { zone_id: zone.id }), true));
+    panel.append(row);
+  }
+  return panel;
+}
+
 function renderDeckControls(state: State, deck: Deck): HTMLElement {
   const panel = document.createElement("section"); panel.className = "panel deck-controls";
-  const heading = document.createElement("h3"); heading.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; panel.append(heading);
+  const heading = document.createElement("h3"); heading.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards${deck.locked ? " · locked" : ""}`; panel.append(heading);
+  if (currentCan("lock.manage") && currentCan("deck.manage") && state.session.status !== "ended") {
+    const type = deck.locked ? "unlock_deck" : "lock_deck";
+    panel.append(button(deck.locked ? "Unlock deck" : "Lock deck", () => void action(state.session.id, type, { deck_id: deck.id, expected_deck_version: deck.version }), true));
+  }
   if (!currentCan("deck.manage")) return panel;
+  if (deck.locked && !deck.locked_by_current) {
+    const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "This deck is locked. Unlock it before using its cards."; panel.append(hint); return panel;
+  }
   const count = document.createElement("input"); count.type = "number"; count.min = "1"; count.max = "100"; count.value = "2";
   panel.append(labelled("Cards to draw", count));
   const target = document.createElement("select"); target.setAttribute("aria-label", `Draw destination for ${deck.label || "deck"}`);
@@ -628,7 +662,7 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
     const option = document.createElement("option"); option.value = value; option.textContent = text; target.append(option);
   }
   if (currentCan("pile.manage")) {
-    for (const pile of state.containers.piles.filter((item) => !item.locked)) {
+    for (const pile of state.containers.piles.filter((item) => !item.locked || item.locked_by_current)) {
       const option = document.createElement("option"); option.value = `pile:${pile.id}`; option.textContent = `Pile: ${pile.label || "Pile"} · ${pile.card_count} cards`; target.append(option);
     }
   }
@@ -639,7 +673,7 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
     const payload: Record<string, unknown> = { deck_id: deck.id, count: requestedCount, direction, target: targetValue.startsWith("pile:") ? "pile" : targetValue };
     if (targetValue.startsWith("pile:")) {
       const pile = state.containers.piles.find((item) => item.id === targetValue.slice(5));
-      if (!pile || pile.locked) { setStatus("That pile is no longer available. Refresh the table and try again.", "error"); return; }
+      if (!pile || (pile.locked && !pile.locked_by_current)) { setStatus("That pile is no longer available. Refresh the table and try again.", "error"); return; }
       payload.pile_id = pile.id; payload.expected_pile_version = pile.version;
     }
     const type = requestedCount === 1 ? (direction === "top" ? "draw_top" : "draw_bottom") : "draw_n";
@@ -667,7 +701,7 @@ function renderTable(state: State): void {
   const welcome = workspace.closest(".welcome");
   welcome?.classList.add("table-active"); welcome?.setAttribute("aria-labelledby", "table-title");
   selectedCardIds.clear(); selectionMode = false;
-  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = [];
+  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = []; cardLockSelectionButtons = [];
   selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
@@ -676,6 +710,9 @@ function renderTable(state: State): void {
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
   const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;
   const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${totalCardCount} cards`; workspace.append(meta);
+  if (state.session.locked && !state.session.locked_by_current) {
+    const locked = document.createElement("p"); locked.className = "flash"; locked.setAttribute("role", "status"); locked.textContent = "This table is locked by another participant. You can still view it or leave."; workspace.append(locked);
+  }
   const currentParticipant = state.participants.find((participant) => participant.is_current);
   if (state.zones.length) { const zones = document.createElement("p"); zones.className = "muted"; zones.textContent = `Zones: ${state.zones.map((zone) => zone.name).join(", ")}`; workspace.append(zones); }
   const players = document.createElement("ul"); players.className = "players";
@@ -684,8 +721,13 @@ function renderTable(state: State): void {
   const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
   const zoneEditor = renderZoneEditor(state); if (zoneEditor) workspace.append(zoneEditor);
+  const zoneLocks = renderZoneLockControls(state); if (zoneLocks) workspace.append(zoneLocks);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
+  if (currentCan("lock.manage") && currentCan("session.manage") && state.session.status !== "ended") {
+    const lockType = state.session.locked ? "unlock_table" : "lock_table";
+    controls.append(button(state.session.locked ? "Unlock table" : "Lock table", () => void action(state.session.id, lockType, {}), true));
+  }
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
     if (state.session.status === "lobby") controls.append(button("Start session", () => void action(state.session.id, "start_session", {})));
     if (state.session.status === "active") controls.append(button("End session", () => {
@@ -715,6 +757,17 @@ function renderTable(state: State): void {
       const item = button(label, () => alignSelectedCards(axis), true); item.disabled = true; alignmentActionButtons.push(item); selectionTools.append(item);
     };
     const removeSelected = button("Remove selected card from play", removeSelectedCard, true); removeSelected.disabled = true; singleSelectionActionButtons.push(removeSelected); selectionTools.append(removeSelected);
+    if (currentCan("lock.manage") && currentCan("card.manage")) {
+      const lockCard = button("Lock selected card", () => {
+        const card = selectedTableCards()[0]; if (card) void action(state.session.id, "lock_card", { card_id: card.id, expected_card_version: card.version });
+      }, true);
+      const unlockCard = button("Unlock selected card", () => {
+        const card = selectedTableCards()[0]; if (card) void action(state.session.id, "unlock_card", { card_id: card.id, expected_card_version: card.version });
+      }, true);
+      lockCard.disabled = unlockCard.disabled = true;
+      cardLockSelectionButtons = [lockCard, unlockCard];
+      selectionTools.append(lockCard, unlockCard);
+    }
     moveAction("Move selection 24 px left", -24, 0);
     moveAction("Move selection 24 px right", 24, 0);
     moveAction("Move selection 24 px up", 0, -24);
@@ -735,7 +788,7 @@ function renderTable(state: State): void {
   if (state.containers.decks.length > 0 && currentCan("deck.manage")) {
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
     for (const deck of state.containers.decks) {
-      if (recipients.length > 1) controls.append(button(`Deal one each from ${deck.label || "deck"}`, () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
+      if (recipients.length > 1 && (!deck.locked || deck.locked_by_current)) controls.append(button(`Deal one each from ${deck.label || "deck"}`, () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
     }
   }
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
@@ -750,12 +803,18 @@ function renderTable(state: State): void {
   for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
   workspace.append(renderRecentActions(state));
   renderBoard(state);
+  if (state.session.locked && !state.session.locked_by_current) {
+    workspace.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
+      if (["Refresh", "Unlock table", "Reset table", "Zoom in", "Zoom out", "Reset zoom"].includes(control.textContent?.trim() ?? "")) return;
+      control.disabled = true;
+    });
+  }
   const back = document.createElement("a"); back.href = "/"; back.textContent = "Back to tables"; workspace.append(back);
 }
 
 function renderZoneOverlay(zone: Zone): HTMLElement {
   const overlay = document.createElement("div"); overlay.className = "table-zone";
-  overlay.setAttribute("role", "img"); overlay.setAttribute("aria-label", `${zone.name} zone, ${zone.behavior.effect ?? "none"} effect`);
+  overlay.setAttribute("role", "img"); overlay.setAttribute("aria-label", `${zone.name} zone${zone.locked ? ", locked" : ""}, ${zone.behavior.effect ?? "none"} effect`);
   overlay.style.left = `${zone.geometry.x}px`; overlay.style.top = `${zone.geometry.y}px`;
   overlay.style.width = `${zone.geometry.width}px`; overlay.style.height = `${zone.geometry.height}px`;
   overlay.style.zIndex = "0";
@@ -788,8 +847,9 @@ function renderBoard(state: State): void {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; canvas.append(empty);
   }
   state.zones.forEach((zone) => canvas.append(renderZoneOverlay(zone)));
-  const canManageCards = currentCan("card.manage");
-  const canManagePiles = currentCan("pile.manage");
+  const tableWritable = !state.session.locked || state.session.locked_by_current;
+  const canManageCards = currentCan("card.manage") && tableWritable;
+  const canManagePiles = currentCan("pile.manage") && tableWritable;
   state.containers.piles.forEach((pile) => canvas.append(renderPile(state, pile, canManagePiles)));
   cards.forEach((card, index) => canvas.append(renderCard(card, index, false, canManageCards)));
   extent.append(canvas);
@@ -891,7 +951,7 @@ function renderBoard(state: State): void {
       }
     }
     if (currentCan("pile.manage")) {
-      const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked);
+      const unlockedPiles = state.containers.piles.filter((pile) => !pile.locked || pile.locked_by_current);
       if (unlockedPiles.length > 0) {
         const target = document.createElement("select"); target.setAttribute("aria-label", "Destination pile for selected hand cards");
         for (const pile of unlockedPiles) {
@@ -964,7 +1024,7 @@ function renderPile(state: State, pile: Pile, interactive: boolean): HTMLElement
   const label = document.createElement("strong"); label.textContent = pile.label || "Pile";
   const count = document.createElement("span"); count.textContent = `${pile.card_count} cards`;
   stack.append(label, count); item.append(stack);
-  if (interactive && !pile.locked) {
+  if (interactive && (!pile.locked || pile.locked_by_current)) {
     const controls = document.createElement("div"); controls.className = "table-pile-controls"; controls.setAttribute("role", "group"); controls.setAttribute("aria-label", `Move or rotate ${pile.label || "pile"}`);
     const moveBy = (dx: number, dy: number): void => void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: Math.max(0, pile.x + dx), y: Math.max(0, pile.y + dy), rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
     const moveLayer = (direction: "front" | "back"): void => {
@@ -1021,21 +1081,22 @@ function surfaceSelectionMode(enabled: boolean): void {
 
 function renderCard(card: Card, index: number, inHand = false, interactive = true): HTMLElement {
   const item = document.createElement("article");
+  const lockedForOther = card.locked && !card.locked_by_current;
   const canSeeFront = card.face_state === "up" || inHand || (card.face_state === "private" && card.card_definition_id !== undefined);
-  item.className = `card ${canSeeFront ? "face-up" : "face-down"}`;
+  item.className = `card ${canSeeFront ? "face-up" : "face-down"}${card.locked ? " locked" : ""}`;
   if (interactive && !inHand) { item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-pressed", "false"); }
   const fallbackLabel = inHand ? "Private card in your hand" : card.face_state === "private" ? "Private table card" : canSeeFront ? "Face-up card" : "Face-down card";
-  item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : fallbackLabel);
+  item.setAttribute("aria-label", `${card.card_label ? `${card.card_label} card` : fallbackLabel}${card.locked ? ", locked" : ""}`);
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);
   const x = card.x ?? 24 + (index % 8) * 74;
   const y = card.y ?? 24 + Math.floor(index / 8) * 28;
   if (!inHand && interactive) {
     item.style.left = `${x}px`; item.style.top = `${y}px`; item.style.transform = `rotate(${card.rotation || 0}deg)`;
-    item.title = "Drag to move. Double click to turn the card.";
+    item.title = lockedForOther ? "Locked by another participant. Select it to request an authorized unlock." : "Drag to move. Double click to turn the card.";
     let drag: { pointerX: number; pointerY: number; startX: number; startY: number; zoom: number; moved: boolean } | null = null;
     item.addEventListener("pointerdown", (event) => {
-      if (selectionMode) return;
+      if (selectionMode || lockedForOther) return;
       item.setPointerCapture(event.pointerId);
       drag = { pointerX: event.clientX, pointerY: event.clientY, startX: x, startY: y, zoom: tableZoom, moved: false };
       item.classList.add("dragging");
@@ -1056,7 +1117,7 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
       else { item.style.left = `${x}px`; item.style.top = `${y}px`; }
     });
     item.addEventListener("pointercancel", () => { drag = null; item.classList.remove("dragging"); item.style.left = `${x}px`; item.style.top = `${y}px`; });
-    item.addEventListener("dblclick", () => { if (!selectionMode) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); });
+    item.addEventListener("dblclick", () => { if (!selectionMode && !lockedForOther) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); });
     item.addEventListener("click", (event) => {
       if (!selectionMode) return;
       event.preventDefault();
@@ -1069,7 +1130,7 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
         if (selectionMode) {
           if (selectedCardIds.has(card.id)) selectedCardIds.delete(card.id); else selectedCardIds.add(card.id);
           updateSelectionUi();
-        } else void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version });
+        } else if (!lockedForOther) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version });
       }
     });
   }
