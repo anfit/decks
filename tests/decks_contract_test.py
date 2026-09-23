@@ -581,6 +581,15 @@ class DecksContractTest(unittest.TestCase):
         for permitted in ("'unfreeze_table'", "'end_session'", "'reset_session'", "'remove_participant'", "'restore_participant'", "'set_participant_capabilities'", "'unlock_table'"):
             self.assertIn(permitted, allowed)
 
+    def test_php_release_migrates_transactionally_before_fpm_activation(self) -> None:
+        entrypoint = read_text(".deployer/run.sh")
+        migration = read_text("scripts/migrate.php")
+        spec = read_text("spec/10-operations.md")
+        self.assertLess(entrypoint.index("php scripts/migrate.php"), entrypoint.index('exec "$php_fpm_bin"'))
+        self.assertIn("$pdo->beginTransaction()", migration)
+        self.assertIn("Migration checksum changed", migration)
+        self.assertIn("before starting FPM", spec)
+
 
 if __name__ == "__main__":
     unittest.main()

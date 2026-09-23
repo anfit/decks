@@ -7,6 +7,9 @@ set -euo pipefail
 : "${DECKS_DB_PASSWORD:?DECKS_DB_PASSWORD is required}"
 : "${DECKS_APP_KEY:?DECKS_APP_KEY is required}"
 
+command -v php >/dev/null 2>&1 || { echo 'PHP CLI is not installed.' >&2; exit 1; }
+php scripts/migrate.php
+
 php_fpm_bin="${DECKS_PHP_FPM_BIN:-}"
 if [[ -z "$php_fpm_bin" ]]; then
   for candidate in php-fpm8.5 php-fpm8.4 php-fpm8.3 php-fpm8.2 php-fpm; do
