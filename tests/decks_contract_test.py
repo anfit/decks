@@ -585,11 +585,15 @@ class DecksContractTest(unittest.TestCase):
         entrypoint = read_text(".deployer/run.sh")
         migration = read_text("scripts/migrate.php")
         spec = read_text("spec/10-operations.md")
-        self.assertLess(entrypoint.index("php scripts/migrate.php"), entrypoint.index('exec "$php_fpm_bin"'))
+        lint = entrypoint.index("for php_file in src/*.php public/*.php scripts/*.php")
+        migrate = entrypoint.index("php scripts/migrate.php")
+        start_fpm = entrypoint.index('exec "$php_fpm_bin"')
+        self.assertLess(lint, migrate)
+        self.assertLess(migrate, start_fpm)
         self.assertIn("$pdo->beginTransaction()", migration)
         self.assertIn("Migration checksum changed", migration)
         self.assertNotIn("use PDO;", migration)
-        self.assertIn("before starting FPM", spec)
+        self.assertIn("syntax-checks the committed application PHP files", spec)
 
 
 if __name__ == "__main__":

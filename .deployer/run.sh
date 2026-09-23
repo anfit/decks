@@ -8,6 +8,9 @@ set -euo pipefail
 : "${DECKS_APP_KEY:?DECKS_APP_KEY is required}"
 
 command -v php >/dev/null 2>&1 || { echo 'PHP CLI is not installed.' >&2; exit 1; }
+for php_file in src/*.php public/*.php scripts/*.php; do
+  php -l "$php_file" >/dev/null
+done
 php scripts/migrate.php
 
 php_fpm_bin="${DECKS_PHP_FPM_BIN:-}"
