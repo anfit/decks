@@ -61,7 +61,7 @@ Database migrations are expand/contract and backward-compatible across the retai
 
 Commit variable names, never values. Expected names include `DECKS_APP_KEY`, `DECKS_DB_PASSWORD`, `DECKS_REALTIME_DB_PASSWORD`, `DECKS_REALTIME_SIGNING_KEY`, `DECKS_SMTP_PASSWORD` and separately scoped bootstrap/migration credentials. Non-secret values include `DECKS_PUBLIC_BASE_URL=https://decks.mmanir.pl`, `DECKS_MAIL_FROM`, SMTP host/port/security/username and lifecycle limits.
 
-The realtime release carries the locked production `node_modules` tree because the current deployer has no build/install hook. Development-only packages remain present in the artifact for now; a later deployer build phase should replace this with a reproducible `npm ci --omit=dev` artifact before capacity-sensitive launch.
+The realtime release carries the locked production `node_modules` tree because the current deployer has no build/install hook. Development-only packages remain present in the artifact for now; a later deployer build phase should replace this with a reproducible `npm ci --omit=dev` artifact before capacity-sensitive launch. The production runtime contract is Node `>=22.22 <25` with PostgreSQL 18; the Node engine declaration, deployer expectation and lockfile must agree. PHP-FPM discovery must include the installed supported PHP-FPM minor rather than requiring an obsolete binary name.
 
 ## Launch checks
 
