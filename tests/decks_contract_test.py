@@ -191,6 +191,22 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn(":focus-visible", styles)
         self.assertIn("@media (max-width: 600px)", styles)
 
+    def test_table_zoom_is_local_bounded_keyboard_accessible_and_preserves_move_coordinates(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        spec = read_text("spec/07-table-interaction.md")
+        self.assertIn("const TABLE_ZOOM_MIN = 0.5", frontend)
+        self.assertIn("const TABLE_ZOOM_MAX = 1.5", frontend)
+        self.assertIn('button("Zoom out"', frontend)
+        self.assertIn('button("Zoom in"', frontend)
+        self.assertIn('button("Reset zoom"', frontend)
+        self.assertIn('surface.tabIndex = 0; surface.setAttribute("role", "region")', frontend)
+        self.assertIn('"aria-live", "polite"', frontend)
+        self.assertIn("(event.clientX - drag.pointerX) / drag.zoom", frontend)
+        self.assertIn("(event.clientY - drag.pointerY) / drag.zoom", frontend)
+        self.assertIn("tableScroll = { left: previousSurface.scrollLeft, top: previousSurface.scrollTop }", frontend)
+        self.assertIn("Zoom is presentation-only", spec)
+        self.assertIn("converts pointer deltas back to logical board coordinates", spec)
+
     def test_frontend_refresh_preserves_current_realtime_socket(self) -> None:
         frontend = read_text("frontend/src/main.ts")
         render_table = frontend.split("function renderTable(state: State): void {", 1)[1].split("\nfunction renderBoard", 1)[0]

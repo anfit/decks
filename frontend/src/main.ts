@@ -50,6 +50,11 @@ let realtimeSessionId: string | null = null;
 let realtimeGeneration = 0;
 let realtimeRetryTimer: number | null = null;
 let selectionMode = false;
+const TABLE_ZOOM_MIN = 0.5;
+const TABLE_ZOOM_MAX = 1.5;
+const TABLE_ZOOM_STEP = 0.1;
+let tableZoom = 1;
+let tableScroll = { left: 0, top: 0 };
 const selectedCardIds = new Set<string>();
 let selectionCountLabel: HTMLElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
@@ -86,10 +91,52 @@ function labelled(labelText: string, control: HTMLElement): HTMLLabelElement {
   const label = document.createElement("label"); label.textContent = labelText; label.append(control); return label;
 }
 
+function fitTableCanvas(surface: HTMLElement): void {
+  const extent = surface.querySelector<HTMLElement>(".table-board-extent");
+  const canvas = surface.querySelector<HTMLElement>(".table-board");
+  if (!extent || !canvas) return;
+  const boardWidth = Number(extent.dataset.boardWidth) || 1;
+  const boardHeight = Number(extent.dataset.boardHeight) || 1;
+  const logicalWidth = Math.max(boardWidth, surface.clientWidth / tableZoom);
+  const logicalHeight = Math.max(boardHeight, surface.clientHeight / tableZoom);
+  canvas.style.width = `${logicalWidth}px`;
+  canvas.style.height = `${logicalHeight}px`;
+  extent.style.width = `${logicalWidth * tableZoom}px`;
+  extent.style.height = `${logicalHeight * tableZoom}px`;
+}
+
+function applyTableZoom(
+  surface: HTMLElement,
+  nextZoom: number,
+  zoomLabel: HTMLOutputElement,
+  zoomOut: HTMLButtonElement,
+  zoomIn: HTMLButtonElement,
+  resetZoom: HTMLButtonElement,
+): void {
+  const canvas = surface.querySelector<HTMLElement>(".table-board");
+  if (!canvas) return;
+  const previousZoom = tableZoom;
+  tableZoom = Math.max(TABLE_ZOOM_MIN, Math.min(TABLE_ZOOM_MAX, Math.round(nextZoom * 10) / 10));
+  const centerX = (surface.scrollLeft + surface.clientWidth / 2) / previousZoom;
+  const centerY = (surface.scrollTop + surface.clientHeight / 2) / previousZoom;
+  canvas.style.transform = `scale(${tableZoom})`;
+  fitTableCanvas(surface);
+  zoomLabel.value = `${Math.round(tableZoom * 100)}%`;
+  zoomLabel.textContent = zoomLabel.value;
+  zoomOut.disabled = tableZoom <= TABLE_ZOOM_MIN;
+  zoomIn.disabled = tableZoom >= TABLE_ZOOM_MAX;
+  resetZoom.disabled = tableZoom === 1;
+  requestAnimationFrame(() => {
+    surface.scrollLeft = Math.max(0, Math.min(centerX * tableZoom - surface.clientWidth / 2, surface.scrollWidth - surface.clientWidth));
+    surface.scrollTop = Math.max(0, Math.min(centerY * tableZoom - surface.clientHeight / 2, surface.scrollHeight - surface.clientHeight));
+  });
+}
+
 function renderHome(user: User): void {
   if (!workspace) return;
   const welcome = workspace.closest(".welcome");
   welcome?.classList.remove("table-active"); welcome?.setAttribute("aria-labelledby", "welcome-title");
+  tableZoom = 1; tableScroll = { left: 0, top: 0 };
   currentState = null; disconnectRealtime();
   workspace.replaceChildren();
   const greeting = document.createElement("p"); greeting.textContent = `Signed in as ${user.email}`; workspace.append(greeting);
@@ -615,6 +662,8 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
 
 function renderTable(state: State): void {
   if (!workspace) return;
+  const previousSurface = workspace.querySelector<HTMLElement>(".table-surface");
+  if (previousSurface) tableScroll = { left: previousSurface.scrollLeft, top: previousSurface.scrollTop };
   const welcome = workspace.closest(".welcome");
   welcome?.classList.add("table-active"); welcome?.setAttribute("aria-labelledby", "table-title");
   selectedCardIds.clear(); selectionMode = false;
@@ -721,16 +770,48 @@ function renderBoard(state: State): void {
   board.setAttribute("aria-label", "Table cards");
   const heading = document.createElement("h3"); heading.textContent = "Table"; board.append(heading);
   const surface = document.createElement("div"); surface.className = "table-surface";
+  surface.tabIndex = 0; surface.setAttribute("role", "region"); surface.setAttribute("aria-label", "Scrollable tabletop");
   const cards = state.cards.filter((card) => card.location_type === "table");
+  const cardRight = cards.map((card, index) => (card.x ?? 24 + (index % 8) * 74) + 180);
+  const cardBottom = cards.map((card, index) => (card.y ?? 24 + Math.floor(index / 8) * 28) + 220);
+  const pileRight = state.containers.piles.map((pile) => pile.x + 240);
+  const pileBottom = state.containers.piles.map((pile) => pile.y + 280);
+  const zoneRight = state.zones.map((zone) => zone.geometry.x + zone.geometry.width + 24);
+  const zoneBottom = state.zones.map((zone) => zone.geometry.y + zone.geometry.height + 24);
+  const boardWidth = Math.max(1, ...cardRight, ...pileRight, ...zoneRight);
+  const boardHeight = Math.max(1, ...cardBottom, ...pileBottom, ...zoneBottom);
+  const extent = document.createElement("div"); extent.className = "table-board-extent";
+  extent.dataset.boardWidth = String(boardWidth); extent.dataset.boardHeight = String(boardHeight);
+  const canvas = document.createElement("div"); canvas.className = "table-board";
+  canvas.style.width = `${boardWidth}px`; canvas.style.height = `${boardHeight}px`; canvas.style.transform = `scale(${tableZoom})`;
   if (cards.length === 0 && state.containers.piles.length === 0) {
-    const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; surface.append(empty);
+    const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; canvas.append(empty);
   }
-  state.zones.forEach((zone) => surface.append(renderZoneOverlay(zone)));
+  state.zones.forEach((zone) => canvas.append(renderZoneOverlay(zone)));
   const canManageCards = currentCan("card.manage");
   const canManagePiles = currentCan("pile.manage");
-  state.containers.piles.forEach((pile) => surface.append(renderPile(state, pile, canManagePiles)));
-  cards.forEach((card, index) => surface.append(renderCard(card, index, false, canManageCards)));
+  state.containers.piles.forEach((pile) => canvas.append(renderPile(state, pile, canManagePiles)));
+  cards.forEach((card, index) => canvas.append(renderCard(card, index, false, canManageCards)));
+  extent.append(canvas);
+  const zoomControls = document.createElement("div"); zoomControls.className = "table-navigation"; zoomControls.setAttribute("role", "group"); zoomControls.setAttribute("aria-label", "Table view controls");
+  const navigationHint = document.createElement("span"); navigationHint.className = "muted"; navigationHint.textContent = "Scroll, arrow keys, or touch to pan. Zoom (50–150%) affects only your view.";
+  const zoomLabel = document.createElement("output"); zoomLabel.className = "table-zoom"; zoomLabel.setAttribute("aria-label", "Table zoom"); zoomLabel.setAttribute("aria-live", "polite");
+  let zoomIn!: HTMLButtonElement;
+  let resetZoom!: HTMLButtonElement;
+  const zoomOut = button("Zoom out", () => applyTableZoom(surface, tableZoom - TABLE_ZOOM_STEP, zoomLabel, zoomOut, zoomIn, resetZoom), true);
+  zoomIn = button("Zoom in", () => applyTableZoom(surface, tableZoom + TABLE_ZOOM_STEP, zoomLabel, zoomOut, zoomIn, resetZoom), true);
+  resetZoom = button("Reset zoom", () => applyTableZoom(surface, 1, zoomLabel, zoomOut, zoomIn, resetZoom), true);
+  zoomControls.append(navigationHint, zoomOut, zoomLabel, zoomIn, resetZoom);
+  board.append(zoomControls);
+  extent.style.width = `${boardWidth * tableZoom}px`;
+  extent.style.height = `${boardHeight * tableZoom}px`;
+  surface.append(extent);
   board.append(surface);
+  zoomLabel.value = `${Math.round(tableZoom * 100)}%`; zoomLabel.textContent = zoomLabel.value;
+  zoomOut.disabled = tableZoom <= TABLE_ZOOM_MIN; zoomIn.disabled = tableZoom >= TABLE_ZOOM_MAX; resetZoom.disabled = tableZoom === 1;
+  workspace.append(board);
+  fitTableCanvas(surface);
+  surface.scrollLeft = tableScroll.left; surface.scrollTop = tableScroll.top;
 
   const currentParticipant = state.participants.find((participant) => participant.is_current);
   const handCards = currentParticipant ? state.cards.filter((card) => card.location_type === "hand" && card.hand_participant_id === currentParticipant.id).sort((left, right) => (left.hand_order ?? 0) - (right.hand_order ?? 0) || left.id.localeCompare(right.id)) : [];
@@ -834,7 +915,6 @@ function renderBoard(state: State): void {
     hand.append(handActions);
   }
   board.append(hand);
-  workspace.append(board);
 }
 
 function renderRecentActions(state: State): HTMLElement {
@@ -908,25 +988,25 @@ function renderPile(state: State, pile: Pile, interactive: boolean): HTMLElement
     );
     item.append(controls);
     item.title = "Drag to move, or use the labeled move and rotate buttons.";
-    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;
+    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; zoom: number; moved: boolean } | null = null;
     item.addEventListener("pointerdown", (event) => {
       if (selectionMode || (event.target instanceof Element && event.target.closest("button"))) return;
       item.setPointerCapture(event.pointerId);
-      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: pile.x, startY: pile.y, moved: false };
+      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: pile.x, startY: pile.y, zoom: tableZoom, moved: false };
       item.classList.add("dragging");
     });
     item.addEventListener("pointermove", (event) => {
       if (!drag) return;
-      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
-      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
-      if (Math.abs(nextX - drag.startX) + Math.abs(nextY - drag.startY) > 4) drag.moved = true;
+      const nextX = Math.max(0, drag.startX + (event.clientX - drag.pointerX) / drag.zoom);
+      const nextY = Math.max(0, drag.startY + (event.clientY - drag.pointerY) / drag.zoom);
+      if (Math.abs(event.clientX - drag.pointerX) + Math.abs(event.clientY - drag.pointerY) > 4) drag.moved = true;
       item.style.left = `${nextX}px`; item.style.top = `${nextY}px`;
     });
     item.addEventListener("pointerup", (event) => {
       if (!drag) return;
-      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
-      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
-      const moved = drag.moved; drag = null; item.classList.remove("dragging");
+      const nextX = Math.max(0, drag.startX + (event.clientX - drag.pointerX) / drag.zoom);
+      const nextY = Math.max(0, drag.startY + (event.clientY - drag.pointerY) / drag.zoom);
+      const moved = drag.moved || Math.abs(event.clientX - drag.pointerX) + Math.abs(event.clientY - drag.pointerY) > 4; drag = null; item.classList.remove("dragging");
       if (moved) void action(statefulSessionId(), "move_pile", { pile_id: pile.id, x: nextX, y: nextY, rotation: pile.rotation, z_index: pile.z_index, expected_pile_version: pile.version });
       else { item.style.left = `${Math.max(0, pile.x)}px`; item.style.top = `${Math.max(0, pile.y)}px`; }
     });
@@ -951,27 +1031,29 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
   if (!inHand && interactive) {
     item.style.left = `${x}px`; item.style.top = `${y}px`; item.style.transform = `rotate(${card.rotation || 0}deg)`;
     item.title = "Drag to move. Double click to turn the card.";
-    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; moved: boolean } | null = null;
+    let drag: { pointerX: number; pointerY: number; startX: number; startY: number; zoom: number; moved: boolean } | null = null;
     item.addEventListener("pointerdown", (event) => {
       if (selectionMode) return;
       item.setPointerCapture(event.pointerId);
-      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: x, startY: y, moved: false };
+      drag = { pointerX: event.clientX, pointerY: event.clientY, startX: x, startY: y, zoom: tableZoom, moved: false };
       item.classList.add("dragging");
     });
     item.addEventListener("pointermove", (event) => {
       if (!drag) return;
-      const nextX = drag.startX + event.clientX - drag.pointerX;
-      const nextY = drag.startY + event.clientY - drag.pointerY;
-      if (Math.abs(nextX - drag.startX) + Math.abs(nextY - drag.startY) > 4) drag.moved = true;
+      const nextX = drag.startX + (event.clientX - drag.pointerX) / drag.zoom;
+      const nextY = drag.startY + (event.clientY - drag.pointerY) / drag.zoom;
+      if (Math.abs(event.clientX - drag.pointerX) + Math.abs(event.clientY - drag.pointerY) > 4) drag.moved = true;
       item.style.left = `${Math.max(0, nextX)}px`; item.style.top = `${Math.max(0, nextY)}px`;
     });
     item.addEventListener("pointerup", (event) => {
       if (!drag) return;
-      const nextX = Math.max(0, drag.startX + event.clientX - drag.pointerX);
-      const nextY = Math.max(0, drag.startY + event.clientY - drag.pointerY);
-      const moved = drag.moved; drag = null; item.classList.remove("dragging");
+      const nextX = Math.max(0, drag.startX + (event.clientX - drag.pointerX) / drag.zoom);
+      const nextY = Math.max(0, drag.startY + (event.clientY - drag.pointerY) / drag.zoom);
+      const moved = drag.moved || Math.abs(event.clientX - drag.pointerX) + Math.abs(event.clientY - drag.pointerY) > 4; drag = null; item.classList.remove("dragging");
       if (moved) void action(statefulSessionId(), "move_card", { card_id: card.id, x: nextX, y: nextY, rotation: card.rotation, z_index: card.z_index, expected_card_version: card.version });
+      else { item.style.left = `${x}px`; item.style.top = `${y}px`; }
     });
+    item.addEventListener("pointercancel", () => { drag = null; item.classList.remove("dragging"); item.style.left = `${x}px`; item.style.top = `${y}px`; });
     item.addEventListener("dblclick", () => { if (!selectionMode) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version }); });
     item.addEventListener("click", (event) => {
       if (!selectionMode) return;
@@ -1061,6 +1143,7 @@ function connectRealtime(sessionId: string): void {
 }
 
 async function openTable(sessionId: string): Promise<void> {
+  if (currentState && currentState.session.id !== sessionId) { tableZoom = 1; tableScroll = { left: 0, top: 0 }; }
   if (realtimeSessionId !== null && realtimeSessionId !== sessionId) disconnectRealtime();
   try { await refreshTable(sessionId); connectRealtime(sessionId); }
   catch (error) { setStatus((error as Error).message, "error"); }
@@ -1079,5 +1162,10 @@ async function start(): Promise<void> {
     } else setStatus((error as Error).message, "error");
   }
 }
+
+window.addEventListener("resize", () => {
+  const surface = workspace?.querySelector<HTMLElement>(".table-surface");
+  if (surface) fitTableCanvas(surface);
+});
 
 void start();

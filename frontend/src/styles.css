@@ -61,7 +61,13 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .table-view { display: grid; gap: .75rem; margin-top: 1.5rem; }
 .table-view h3 { margin: .25rem 0; }
 .table-view, .table-surface { min-width: 0; }
-.table-surface { position: relative; min-height: 20rem; overflow: auto; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }
+.table-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.table-navigation .muted { flex: 1 1 14rem; }
+.table-zoom { min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.table-surface { position: relative; height: min(65vh, 50rem); min-height: 20rem; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; border: 1px solid #315b47; border-radius: .8rem; background: var(--table-color, #286044); box-shadow: inset 0 0 0 1rem #214d39; }
+.table-surface:focus-visible { outline: 3px solid #f2c14e; outline-offset: 2px; }
+.table-board-extent { position: relative; min-width: 100%; min-height: 100%; }
+.table-board { position: relative; transform-origin: top left; }
 .table-empty { margin: 2rem; color: #dbece2; }
 .table-pile { position: absolute; display: grid; justify-items: center; gap: .35rem; width: 9rem; padding: .35rem; cursor: grab; touch-action: manipulation; user-select: none; }
 .table-pile.locked { cursor: default; }
@@ -101,4 +107,4 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .action-history { max-height: 18rem; overflow: auto; }
 .action-history h3 { margin: 0; }
 .action-history ol { margin: 0; padding-left: 1.5rem; line-height: 1.6; }
-@media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .welcome.table-active { padding: .75rem; } .table-surface { min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .table-pile { width: 8rem; } .table-pile-stack { width: 5.5rem; min-height: 6rem; } .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select, .table-pile-controls button { min-height: 2.75rem; } }
+@media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .welcome.table-active { padding: .75rem; } .table-surface { height: 55vh; min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .table-pile { width: 8rem; } .table-pile-stack { width: 5.5rem; min-height: 6rem; } .table-navigation button, .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select, .table-pile-controls button { min-height: 2.75rem; } }
