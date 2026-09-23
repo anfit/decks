@@ -1,6 +1,6 @@
 # Participant capability policy
 
-Status: S17/S18 authorization slice, 2026-09-22.
+Status: S17/S18 authorization slice; scoped-lock matrix extended 2026-09-23.
 
 Table roles remain host, player and spectator, while `session_participants.capabilities` supplies explicit per-participant grants. An absent capability uses the role default: hosts may administer the table, players may perform ordinary card/deck/pile actions, and spectators are read-only. An explicit boolean grant or denial overrides the default for that participant. Global account administration does not grant table capabilities.
 
@@ -25,5 +25,8 @@ Composite operations must require a grant for each source and destination domain
 | `spread_pile` | `pile.manage`, `card.manage` |
 | `lock_card`, `unlock_card` | `lock.manage`, `card.manage` |
 | `lock_pile`, `unlock_pile` | `lock.manage`, `pile.manage` |
+| `lock_deck`, `unlock_deck` | `lock.manage`, `deck.manage` |
+| `lock_zone`, `unlock_zone` | `lock.manage`, `zone.manage` |
+| `lock_table`, `unlock_table` | `lock.manage`, `session.manage` |
 
 Single-domain operations such as moving or labeling a pile continue to use their resource-domain capability. A composite denial is checked before duplicate replay and before the action mutation path; no card, container, event, or session revision changes on denial. New operations must extend this matrix before implementation.
