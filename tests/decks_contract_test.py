@@ -213,7 +213,7 @@ class DecksContractTest(unittest.TestCase):
         action = read_text("src/ActionService.php")
         frontend = read_text("frontend/src/main.ts")
         spec = read_text("spec/20-multi-card-and-z-order.md")
-        for method in ("public static function rotateCards", "public static function setCardsFace", "public static function reorderCards", "private static function tableSelection"):
+        for method in ("public static function moveCards", "public static function rotateCards", "public static function setCardsFace", "public static function reorderCards", "private static function tableSelection"):
             self.assertIn(method, card)
         self.assertIn("That table card is private.", card)
         self.assertIn("That table card is private.", pile)
@@ -221,7 +221,9 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("'rotate_cards' => CardService::rotateCards", action)
         self.assertIn("'set_cards_face' => CardService::setCardsFace", action)
         self.assertIn("'reorder_cards' => CardService::reorderCards", action)
-        for label in ("Select cards", "Turn selected face up", "Bring selection to front", "Send selection to back"):
+        self.assertIn("'move_cards' => CardService::moveCards", action)
+        self.assertIn("Only table cards can move as a group.", card)
+        for label in ("Select cards", "Move selection 24 px left", "Move selection 24 px right", "Move selection 24 px up", "Move selection 24 px down", "Align selected left edges", "Align selected top edges", "Turn selected face up", "Bring selection to front", "Send selection to back"):
             self.assertIn(label, frontend)
         self.assertIn("expected_card_versions", frontend)
         self.assertIn("atomic stale-selection rejection", spec)

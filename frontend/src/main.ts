@@ -51,6 +51,7 @@ let selectionMode = false;
 const selectedCardIds = new Set<string>();
 let selectionCountLabel: HTMLElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
+let alignmentActionButtons: HTMLButtonElement[] = [];
 const selectedHandCardIds = new Set<string>();
 let handSelectionCountLabel: HTMLElement | null = null;
 let handSelectionButtons: HTMLButtonElement[] = [];
@@ -318,6 +319,7 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
 function updateSelectionUi(): void {
   if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
   for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0;
+  for (const item of alignmentActionButtons) item.disabled = selectedCardIds.size < 2;
   workspace?.querySelectorAll<HTMLElement>(".table-surface .card[data-card-id]").forEach((item) => {
     const selected = selectedCardIds.has(item.dataset.cardId ?? "");
     item.classList.toggle("selected", selected);
@@ -351,6 +353,47 @@ function applySelectedAction(type: string, values: Record<string, unknown>): voi
   const sessionId = currentState.session.id;
   selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
   void action(sessionId, type, payload);
+}
+
+function selectedTableCards(): Card[] {
+  if (!currentState) return [];
+  return Array.from(selectedCardIds, (cardId) => currentState?.cards.find((card) => card.id === cardId && card.location_type === "table"))
+    .filter((card): card is Card => card !== undefined);
+}
+
+function submitSelectedPositions(cards: Card[], positions: Array<{ x: number; y: number }>): void {
+  if (!currentState || cards.length === 0 || cards.length !== selectedCardIds.size || positions.length !== cards.length) return;
+  const sessionId = currentState.session.id;
+  const items = cards.map((card, index) => {
+    const position = positions[index]!;
+    return {
+      card_id: card.id,
+      expected_card_version: card.version,
+      x: position.x,
+      y: position.y,
+      rotation: card.rotation,
+      z_index: card.z_index,
+    };
+  });
+  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
+  void action(sessionId, "move_cards", { cards: items });
+}
+
+function moveSelectedCards(deltaX: number, deltaY: number): void {
+  const cards = selectedTableCards();
+  if (!currentState || cards.length === 0 || cards.length !== selectedCardIds.size) return;
+  const positions = cards.map((card) => ({ x: card.x ?? 24, y: card.y ?? 24 }));
+  const safeDeltaX = Math.max(deltaX, -Math.min(...positions.map((position) => position.x)));
+  const safeDeltaY = Math.max(deltaY, -Math.min(...positions.map((position) => position.y)));
+  submitSelectedPositions(cards, positions.map((position) => ({ x: position.x + safeDeltaX, y: position.y + safeDeltaY })));
+}
+
+function alignSelectedCards(axis: "x" | "y"): void {
+  const cards = selectedTableCards();
+  if (!currentState || cards.length < 2 || cards.length !== selectedCardIds.size) return;
+  const positions = cards.map((card) => ({ x: card.x ?? 24, y: card.y ?? 24 }));
+  const aligned = Math.min(...positions.map((position) => position[axis]));
+  submitSelectedPositions(cards, positions.map((position) => axis === "x" ? { ...position, x: aligned } : { ...position, y: aligned }));
 }
 
 function renderCapabilityControls(state: State): HTMLElement | null {
@@ -424,7 +467,7 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
 function renderTable(state: State): void {
   if (!workspace) return;
   selectedCardIds.clear(); selectionMode = false;
-  selectionCountLabel = null; selectionActionButtons = [];
+  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = [];
   selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
@@ -463,6 +506,18 @@ function renderTable(state: State): void {
     const groupAction = (label: string, type: string, values: Record<string, unknown>): void => {
       const item = button(label, () => applySelectedAction(type, values), true); item.disabled = true; selectionActionButtons.push(item); selectionTools.append(item);
     };
+    const moveAction = (label: string, deltaX: number, deltaY: number): void => {
+      const item = button(label, () => moveSelectedCards(deltaX, deltaY), true); item.disabled = true; selectionActionButtons.push(item); selectionTools.append(item);
+    };
+    const alignAction = (label: string, axis: "x" | "y"): void => {
+      const item = button(label, () => alignSelectedCards(axis), true); item.disabled = true; alignmentActionButtons.push(item); selectionTools.append(item);
+    };
+    moveAction("Move selection 24 px left", -24, 0);
+    moveAction("Move selection 24 px right", 24, 0);
+    moveAction("Move selection 24 px up", 0, -24);
+    moveAction("Move selection 24 px down", 0, 24);
+    alignAction("Align selected left edges", "x");
+    alignAction("Align selected top edges", "y");
     groupAction("Rotate selection 15°", "rotate_cards", { rotation_delta: 15 });
     groupAction("Turn selected face up", "set_cards_face", { face_state: "up" });
     groupAction("Turn selected face down", "set_cards_face", { face_state: "down" });
