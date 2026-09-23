@@ -31,6 +31,8 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .status { min-height: 1.5rem; margin-bottom: 0; color: #1459a6; }
 .status[data-state="error"] { color: #9e2b2b; }
 .panel { display: grid; gap: .65rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd5dc; border-radius: .6rem; background: #f8fafb; }
+.removed-card-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.removed-card-list li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; }
 fieldset { min-width: 0; margin: 0; padding: .75rem; border: 1px solid #cbd5dc; border-radius: .45rem; }
 fieldset legend { padding: 0 .25rem; font-weight: 700; }
 .deck-selections { display: grid; gap: .6rem; }

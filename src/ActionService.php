@@ -143,11 +143,17 @@ final class ActionService
             }
             $cardProjection[] = $projected;
         }
+        $removedCardProjection = [];
+        if (($member['role'] ?? '') === 'host' && SessionService::hasCapability($member, 'card.manage')) {
+            $removedCards = $database->prepare("SELECT id, version FROM session_cards WHERE session_id = :session AND location_type = 'removed' ORDER BY id");
+            $removedCards->execute(['session' => $sessionId]);
+            foreach ($removedCards as $removedCard) $removedCardProjection[] = ['id' => (string) $removedCard['id'], 'version' => (int) $removedCard['version']];
+        }
         return [
             'revision' => (int) $session['revision'],
             'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at']],
             'configuration' => json_decode((string) $session['access_settings'], true, 512, JSON_THROW_ON_ERROR),
-            'participants' => array_map(static function (array $row) use ($userId, $handCounts): array {
+            'participants' => array_map(static function (array $row) use ($userId, $handCounts, $member): array {
                 $isCurrent = (string) $row['user_id'] === (string) $userId;
                 $projection = ['id' => (string) $row['id'], 'role' => (string) $row['role'], 'is_current' => $isCurrent, 'hand_count' => $handCounts[(string) $row['id']] ?? 0];
                 if ($isCurrent || ($member['role'] ?? '') === 'host') $projection['capabilities'] = SessionService::capabilities($row);
@@ -156,6 +162,7 @@ final class ActionService
             'containers' => $containerProjection,
             'zones' => $zoneProjection,
             'cards' => $cardProjection,
+            'removed_cards' => $removedCardProjection,
         ];
     }
 

@@ -11,7 +11,7 @@ type Card = { id: string; location_type: string; deck_id: string | null; pile_id
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
-type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[] };
+type State = { revision: number; session: Session; configuration: { mat?: { label?: string; color?: string }; preset_id?: string | null }; participants: Participant[]; containers: { decks: Deck[]; piles: Pile[] }; zones: Array<{ id: string; name: string; geometry: { x: number; y: number; width: number; height: number }; priority: number; behavior: Record<string, unknown> }>; cards: Card[]; removed_cards?: Array<{ id: string; version: number }> };
 const CAPABILITIES: Array<{ key: Capability; label: string }> = [
   { key: "session.manage", label: "Session administration" }, { key: "participant.manage", label: "Participant administration" },
   { key: "zone.manage", label: "Zone administration" }, { key: "deck.manage", label: "Deck actions" },
@@ -52,6 +52,7 @@ const selectedCardIds = new Set<string>();
 let selectionCountLabel: HTMLElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
 let alignmentActionButtons: HTMLButtonElement[] = [];
+let singleSelectionActionButtons: HTMLButtonElement[] = [];
 const selectedHandCardIds = new Set<string>();
 let handSelectionCountLabel: HTMLElement | null = null;
 let handSelectionButtons: HTMLButtonElement[] = [];
@@ -320,6 +321,7 @@ function updateSelectionUi(): void {
   if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
   for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0;
   for (const item of alignmentActionButtons) item.disabled = selectedCardIds.size < 2;
+  for (const item of singleSelectionActionButtons) item.disabled = selectedCardIds.size !== 1;
   workspace?.querySelectorAll<HTMLElement>(".table-surface .card[data-card-id]").forEach((item) => {
     const selected = selectedCardIds.has(item.dataset.cardId ?? "");
     item.classList.toggle("selected", selected);
@@ -353,6 +355,17 @@ function applySelectedAction(type: string, values: Record<string, unknown>): voi
   const sessionId = currentState.session.id;
   selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
   void action(sessionId, type, payload);
+}
+
+function removeSelectedCard(): void {
+  if (!currentState || currentState.session.status === "ended") return;
+  const cards = selectedTableCards();
+  if (cards.length !== 1 || selectedCardIds.size !== 1) return;
+  if (!window.confirm("Remove the selected card from play? The host can restore it later.")) return;
+  const card = cards[0]!;
+  const sessionId = currentState.session.id;
+  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
+  void action(sessionId, "remove_card", { card_id: card.id, expected_card_version: card.version });
 }
 
 function selectedTableCards(): Card[] {
@@ -420,6 +433,29 @@ function renderCapabilityControls(state: State): HTMLElement | null {
   return panel;
 }
 
+function renderRemovedCardControls(state: State): HTMLElement | null {
+  const current = state.participants.find((participant) => participant.is_current);
+  const removedCards = state.removed_cards ?? [];
+  if (state.session.status === "ended" || current?.role !== "host" || !currentCan("card.manage") || removedCards.length === 0) return null;
+  const panel = document.createElement("section"); panel.className = "panel removed-card-controls";
+  const heading = document.createElement("h3"); heading.textContent = `Removed cards (${removedCards.length})`; panel.append(heading);
+  const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Cards are unnamed here to protect hidden information. Restoration returns each card to its source deck."; panel.append(hint);
+  const position = document.createElement("select"); position.setAttribute("aria-label", "Restore position");
+  const positions: Array<[string, string]> = [["top", "Top of source deck"], ["bottom", "Bottom of source deck"], ["shuffle", "Shuffle into source deck"]];
+  for (const [value, text] of positions) {
+    const option = document.createElement("option"); option.value = value; option.textContent = text; position.append(option);
+  }
+  panel.append(labelled("Restore position", position));
+  const list = document.createElement("ul"); list.className = "removed-card-list";
+  for (const removed of removedCards) {
+    const row = document.createElement("li"); row.append(document.createTextNode("Removed card"));
+    row.append(button("Restore", () => void action(state.session.id, "restore_card", { card_id: removed.id, expected_card_version: removed.version, position: position.value }), true));
+    list.append(row);
+  }
+  panel.append(list);
+  return panel;
+}
+
 function renderDeckControls(state: State, deck: Deck): HTMLElement {
   const panel = document.createElement("section"); panel.className = "panel deck-controls";
   const heading = document.createElement("h3"); heading.textContent = `${deck.label || "Deck"} · ${deck.card_count} cards`; panel.append(heading);
@@ -467,7 +503,7 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
 function renderTable(state: State): void {
   if (!workspace) return;
   selectedCardIds.clear(); selectionMode = false;
-  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = [];
+  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = [];
   selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
@@ -482,6 +518,7 @@ function renderTable(state: State): void {
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
   const capabilityPanel = renderCapabilityControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
+  const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
@@ -490,7 +527,7 @@ function renderTable(state: State): void {
       if (window.confirm("End this session for everyone? Participants will no longer be able to change the table.")) void action(state.session.id, "end_session", {});
     }, true));
   }
-  if (currentCan("card.manage")) {
+  if (currentCan("card.manage") && state.session.status !== "ended") {
     const selectCards = button("Select cards", () => {
       selectionMode = !selectionMode;
       selectedCardIds.clear();
@@ -512,6 +549,7 @@ function renderTable(state: State): void {
     const alignAction = (label: string, axis: "x" | "y"): void => {
       const item = button(label, () => alignSelectedCards(axis), true); item.disabled = true; alignmentActionButtons.push(item); selectionTools.append(item);
     };
+    const removeSelected = button("Remove selected card from play", removeSelectedCard, true); removeSelected.disabled = true; singleSelectionActionButtons.push(removeSelected); selectionTools.append(removeSelected);
     moveAction("Move selection 24 px left", -24, 0);
     moveAction("Move selection 24 px right", 24, 0);
     moveAction("Move selection 24 px up", 0, -24);

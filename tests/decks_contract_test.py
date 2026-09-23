@@ -200,6 +200,7 @@ class DecksContractTest(unittest.TestCase):
         frontend = read_text("frontend/src/main.ts")
         styles = read_text("frontend/src/styles.css")
         self.assertIn("$isCurrent || ($member['role'] ?? '') === 'host'", action)
+        self.assertIn("use ($userId, $handCounts, $member)", action)
         self.assertIn("Participant capabilities", frontend)
         self.assertIn("set_participant_capabilities", frontend)
         self.assertIn("currentCan(\"deck.manage\")", frontend)
@@ -255,6 +256,17 @@ class DecksContractTest(unittest.TestCase):
         self.assertLess(action.index("self::requiredCapabilities($type, $payload)"), action.index("$duplicate = $database->prepare"))
         self.assertIn("Expected card versions are required.", card)
         self.assertIn("`return_top`, `return_bottom`, `return_to_source_decks`, `insert_cards`", spec)
+
+    def test_removed_card_recovery_is_host_scoped_and_does_not_project_identity(self) -> None:
+        action = read_text("src/ActionService.php")
+        frontend = read_text("frontend/src/main.ts")
+        spec = read_text("spec/07-table-interaction.md")
+        self.assertIn("$member['role'] ?? '') === 'host' && SessionService::hasCapability($member, 'card.manage')", action)
+        self.assertIn("SELECT id, version FROM session_cards WHERE session_id = :session AND location_type = 'removed'", action)
+        self.assertIn("'removed_cards' => $removedCardProjection", action)
+        self.assertIn("Remove the selected card from play? The host can restore it later.", frontend)
+        self.assertIn('"restore_card", { card_id: removed.id, expected_card_version: removed.version, position: position.value }', frontend)
+        self.assertIn("never presents the card definition/name, protected asset path, source-deck association, or removed-card ordering", spec)
 
     def test_return_selection_resolves_source_decks_without_projecting_associations(self) -> None:
         frontend = read_text("frontend/src/main.ts")
