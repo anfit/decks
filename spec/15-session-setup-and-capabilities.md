@@ -11,3 +11,11 @@ The join surface lets an authenticated visitor choose `player` or `spectator` an
 The table workspace exposes lifecycle controls to a host with `session.manage`: a lobby can be started, an active session can be ended with confirmation, and a reset returns the table to its lobby state after confirmation. Ended sessions remain read-only except for the documented host reset/recovery path. Collect/reset controls are independent of the participant's deck/card action grants.
 
 Acceptance requires owner scoping for list endpoints, a browser path that creates a configured table and resumes it from the table list, and a browser path that joins as either player or spectator without decoding the token in JavaScript.
+
+## Host participant administration surface
+
+During a non-ended session, the active host with effective `participant.manage` sees generic rows for other active participants and may transfer host role or remove a player/spectator. Both actions require a confirmation naming the generic row and consequence; transfer is allowed only to another active player or spectator, matching the service contract. Capability checkboxes remain in the same host-only surface and continue to submit the full effective capability map. The panel must not show participant IDs, account emails, invite credentials, or hand card identities.
+
+The same host may see a separate recovery list for removed non-host participants. The snapshot projects only an opaque participant action target and former role to the authorized host; all other participants receive an empty list. Each row is labeled generically, and restoration lets the host choose `player` or `spectator`. Do not project removed users' emails, user IDs, card contents, private hand order, or removal-time metadata. Restore and other administration controls are hidden for ended sessions. Mutations use the ordinary action envelope and its expected session revision; the service remains the authority for membership, role and capability checks.
+
+Acceptance covers role transfer, removal and restore in a two-account session; denial for players/spectators and denied capabilities; sanitized public history; and absence of the removed roster from non-host snapshots and events. Start-session remains the configuration freeze action, and host reset-to-lobby is the unfreeze/recovery path already specified above.
