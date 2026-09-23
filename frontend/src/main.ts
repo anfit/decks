@@ -88,6 +88,8 @@ function labelled(labelText: string, control: HTMLElement): HTMLLabelElement {
 
 function renderHome(user: User): void {
   if (!workspace) return;
+  const welcome = workspace.closest(".welcome");
+  welcome?.classList.remove("table-active"); welcome?.setAttribute("aria-labelledby", "welcome-title");
   currentState = null; disconnectRealtime();
   workspace.replaceChildren();
   const greeting = document.createElement("p"); greeting.textContent = `Signed in as ${user.email}`; workspace.append(greeting);
@@ -196,12 +198,23 @@ async function loadHomeData(preset: HTMLSelectElement, deckChoices: HTMLElement,
     const section = document.createElement("section"); section.className = "panel";
     const heading = document.createElement("h2"); heading.textContent = "Your tables"; section.append(heading);
     const rows = sessions.sessions as Array<{ id: string; title: string | null; status: string; revision: number; role: string }> ?? [];
-    if (rows.length === 0) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "No active tables yet."; section.append(empty); }
-    for (const row of rows) {
-      const item = document.createElement("div"); item.className = "session-row";
-      const text = document.createElement("span"); text.textContent = `${row.title || "Untitled table"} · ${row.status} · revision ${row.revision} · ${row.role}`;
-      item.append(text, button("Open", () => void openTable(row.id), true)); section.append(item);
-    }
+    const search = document.createElement("input"); search.type = "search"; search.autocomplete = "off"; search.placeholder = "Search title, status, or role"; search.setAttribute("aria-label", "Search your tables");
+    section.append(labelled("Find a table", search));
+    const list = document.createElement("div"); list.className = "table-list"; section.append(list);
+    const renderRows = (): void => {
+      list.replaceChildren();
+      if (rows.length === 0) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "No active tables yet."; list.append(empty); return; }
+      const query = search.value.trim().toLocaleLowerCase();
+      const matching = rows.filter((row) => `${row.title || "Untitled table"} ${row.status} ${row.role}`.toLocaleLowerCase().includes(query));
+      if (matching.length === 0) { const empty = document.createElement("p"); empty.className = "muted"; empty.setAttribute("role", "status"); empty.textContent = "No tables match that search."; list.append(empty); return; }
+      for (const row of matching) {
+        const item = document.createElement("div"); item.className = "session-row";
+        const text = document.createElement("span"); text.textContent = `${row.title || "Untitled table"} · ${row.status} · revision ${row.revision} · ${row.role}`;
+        const open = button("Open", () => void openTable(row.id), true); open.setAttribute("aria-label", `Open ${row.title || "untitled table"}`);
+        item.append(text, open); list.append(item);
+      }
+    };
+    search.addEventListener("input", renderRows); renderRows();
     workspace.append(section);
   } catch (error) {
     setStatus(`Setup unavailable: ${(error as Error).message}`, "error");
@@ -602,12 +615,14 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
 
 function renderTable(state: State): void {
   if (!workspace) return;
+  const welcome = workspace.closest(".welcome");
+  welcome?.classList.add("table-active"); welcome?.setAttribute("aria-labelledby", "table-title");
   selectedCardIds.clear(); selectionMode = false;
   selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = [];
   selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
   currentState = state; workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
-  const heading = document.createElement("h2"); heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
+  const heading = document.createElement("h2"); heading.id = "table-title"; heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
   const tableCardCount = state.cards.filter((card) => card.location_type === "table").length;
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
   const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;

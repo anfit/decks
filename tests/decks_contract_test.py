@@ -388,6 +388,22 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn('id="workspace"', source)
         self.assertIn('id="connection-status"', source)
         self.assertIn('aria-labelledby="welcome-title"', source)
+        self.assertIn('id="welcome-description"', source)
+
+    def test_home_search_layout_and_empty_hand_contrast_follow_ux_audit(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        styles = read_text("frontend/src/styles.css")
+        spec = read_text("spec/14-ux-audit.md")
+        self.assertIn('search.setAttribute("aria-label", "Search your tables")', frontend)
+        self.assertIn("No tables match that search.", frontend)
+        self.assertIn('classList.add("table-active")', frontend)
+        self.assertIn('classList.remove("table-active")', frontend)
+        self.assertIn('setAttribute("aria-labelledby", "table-title")', frontend)
+        self.assertIn('heading.id = "table-title"', frontend)
+        self.assertIn(".welcome.table-active > #welcome-title", styles)
+        self.assertIn(".hand-tray .table-empty", styles)
+        self.assertIn("top-align the app shell", spec)
+        self.assertIn("client-side search over the caller's own resumable table", spec)
 
     def test_first_admin_bootstrap_supports_one_time_hash_migration(self) -> None:
         source = read_text("scripts/bootstrap-admin.php")

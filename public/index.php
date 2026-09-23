@@ -419,7 +419,7 @@ header('Cache-Control: no-store');
         <section class="welcome" aria-labelledby="welcome-title">
           <p class="eyebrow">Decks</p>
           <h1 id="welcome-title">A shared table for physical card play.</h1>
-          <p class="muted">Create a table or join one from an invitation.</p>
+          <p id="welcome-description" class="muted">Create a table or join one from an invitation.</p>
           <div id="workspace"></div>
           <p id="connection-status" class="status">Starting…</p>
         </section>
