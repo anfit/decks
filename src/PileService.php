@@ -198,7 +198,8 @@ final class PileService
         self::assertPlayer($session, $member);
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
         self::assertPileUnlocked($pile, $member);
-        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
+        if (!array_key_exists('expected_pile_version', $payload) || filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected pile version is required.');
+        if ((int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         $cards = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'pile' AND pile_id = :pile ORDER BY order_key FOR UPDATE");
         $cards->execute(['session' => $session['id'], 'pile' => $pile['id']]); $rows = $cards->fetchAll();
         foreach ($rows as $card) self::assertCanControl($card, $member);
@@ -217,7 +218,8 @@ final class PileService
         self::assertPlayer($session, $member);
         $pile = self::pile($database, $session['id'], (string) ($payload['pile_id'] ?? ''));
         self::assertPileUnlocked($pile, $member);
-        if (isset($payload['expected_pile_version']) && (int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
+        if (!array_key_exists('expected_pile_version', $payload) || filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false) throw new RuntimeException('Expected pile version is required.');
+        if ((int) $payload['expected_pile_version'] !== (int) $pile['version']) throw new RuntimeException('Pile changed; refresh and try again.');
         $spacing = (float) ($payload['spacing'] ?? 28);
         if (!is_finite($spacing) || $spacing < 1 || $spacing > 500) throw new RuntimeException('Spread spacing is invalid.');
         $axis = ($payload['axis'] ?? 'x') === 'y' ? 'y' : 'x';

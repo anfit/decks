@@ -263,6 +263,21 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
     splitCount.addEventListener("input", () => { const count = Number(splitCount.value); splitButton.disabled = pile.card_count < 2 || !Number.isInteger(count) || count < 1 || count >= pile.card_count; });
     actions.append(splitButton);
 
+    const reverse = button("Reverse pile order", () => void action(state.session.id, "reverse_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true);
+    const flip = button("Flip pile (reverse and turn cards)", () => void action(state.session.id, "flip_pile", { pile_id: pile.id, expected_pile_version: pile.version }), true);
+    reverse.disabled = flip.disabled = pile.card_count === 0;
+    actions.append(reverse, flip);
+
+    if (canChangePileCards) {
+      const spread = (axis: "x" | "y"): void => void action(state.session.id, "spread_pile", { pile_id: pile.id, axis, expected_pile_version: pile.version });
+      const horizontal = button("Spread pile horizontally", () => spread("x"), true);
+      const vertical = button("Spread pile vertically", () => spread("y"), true);
+      horizontal.disabled = vertical.disabled = pile.card_count === 0;
+      actions.append(horizontal, vertical);
+    } else {
+      const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Spreading also requires card-management permission."; actions.append(hint);
+    }
+
     if (canChangePileCards) {
       const collect = button("Collect selected cards into this pile", () => applySelectedAction("collect_spread", { pile_id: pile.id, expected_pile_version: pile.version }), true);
       collect.disabled = selectedCardIds.size === 0;

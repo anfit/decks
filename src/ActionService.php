@@ -203,7 +203,7 @@ final class ActionService
         $base = self::capabilityForAction($type);
         if ($base !== null) $required[] = $base;
         $additional = match ($type) {
-            'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage'],
+            'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'spread_pile', 'lock_card', 'unlock_card' => ['card.manage'],
             'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage'],
             'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => ['deck.manage'],
             default => [],

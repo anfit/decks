@@ -132,10 +132,15 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("'label' => $pile['label']", action)
         self.assertIn("'locked' => $pile['locked_by'] !== null", action)
         pile = read_text("src/PileService.php")
-        for method in ("public static function draw", "public static function split", "public static function merge", "public static function collectSpread", "public static function updateGeometry", "public static function label", "public static function lock"):
+        for method in ("public static function draw", "public static function split", "public static function merge", "public static function collectSpread", "public static function updateGeometry", "public static function label", "public static function lock", "public static function reverse", "public static function spread"):
             self.assertIn(method, pile)
+        reverse = pile.split("public static function reverse(", 1)[1].split("public static function spread(", 1)[0]
+        spread = pile.split("public static function spread(", 1)[1].split("public static function mergeIntoDeck(", 1)[0]
+        for operation in (reverse, spread):
+            self.assertIn("!array_key_exists('expected_pile_version', $payload)", operation)
+            self.assertIn("filter_var($payload['expected_pile_version'], FILTER_VALIDATE_INT) === false", operation)
         frontend = read_text("frontend/src/main.ts")
-        for label in ("More pile actions", "Split top into new pile", "Merge at top", "Merge at bottom", "Collect selected cards into this pile", "Save pile label"):
+        for label in ("More pile actions", "Split top into new pile", "Merge at top", "Merge at bottom", "Collect selected cards into this pile", "Save pile label", "Reverse pile order", "Flip pile (reverse and turn cards)", "Spread pile horizontally", "Spread pile vertically"):
             self.assertIn(label, frontend)
         self.assertIn("expected_target_version: destination.version", frontend)
         self.assertIn("candidate.id !== pile.id && !candidate.locked", frontend)
@@ -242,7 +247,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("public static function collectSpread", pile)
         self.assertIn("self::requiredCapabilities($type, $payload)", action)
         self.assertIn("if (in_array($type, ['draw_top', 'draw_bottom', 'draw_n'], true) && ($payload['target'] ?? 'table') === 'pile') $required[] = 'pile.manage'", action)
-        self.assertIn("'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'lock_card', 'unlock_card' => ['card.manage']", action)
+        self.assertIn("'return_top', 'return_bottom', 'return_to_source_decks', 'insert_cards', 'draw_pile_top', 'draw_pile_bottom', 'move_to_pile', 'collect_spread', 'spread_pile', 'lock_card', 'unlock_card' => ['card.manage']", action)
         self.assertIn("'split_deck', 'lock_pile', 'unlock_pile' => ['pile.manage']", action)
         self.assertIn("'merge_pile_top', 'merge_pile_bottom', 'merge_pile_shuffle' => ['deck.manage']", action)
         self.assertIn("'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck'", action)
