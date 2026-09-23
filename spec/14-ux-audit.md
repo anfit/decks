@@ -147,6 +147,10 @@ Spec-first updates in `spec/15-session-setup-and-capabilities.md` (`d2fd63c`, `4
 
 The source interaction passed 32/32 contract tests, TypeScript typecheck, production asset build and diff check. It has not been exercised in a browser or two-account session. Production remains behind source and the current shell lacks the trusted deploy configuration/toolchain; keep all participant operations in deployment acceptance and the UX result provisional.
 
+## Visual density and table-list follow-up contract — 2026-09-23
+
+Address the measured 1280×720 findings with a compact first screen: top-align the app shell, reduce the global heading size, and hide the marketing title/description while a table is open. Give the table workspace a wider responsive maximum width. Add an accessible client-side search over the caller's own resumable table title/status/role, with clear empty and no-match states. Increase the empty-hand instruction contrast against its light tray without changing the face-down table-surface text color. Keep all controls keyboard-operable and preserve narrow-screen scrolling.
+
 ## Visual zone editor follow-up — 2026-09-23
 
 The committed `spec/08-presets-zones.md` contract now defines host-only lobby editing. Source commit `8678fbf` displays zones as named rectangles behind cards/piles and lets the host add, edit, and confirm deletion of zones using labeled inputs for geometry, priority and effect. Starting a session removes the editor and the server rejects any zone mutation after the lobby. The control passes 33/33 contract tests, TypeScript, Vite build and diff check.
