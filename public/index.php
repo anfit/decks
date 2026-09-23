@@ -39,6 +39,14 @@ function h(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function optional_string_field(array $body, string $key): ?string
+{
+    $value = $body[$key] ?? null;
+    if ($value === null || $value === '') return null;
+    if (!is_string($value)) throw new RuntimeException('The submitted field is invalid.');
+    return $value;
+}
+
 function page(string $title, string $body): never
 {
     header('Content-Type: text/html; charset=utf-8');
@@ -362,9 +370,13 @@ if (str_starts_with($path, '/api/')) {
     if ($user === null) json_response(['error' => 'authentication_required'], 401);
     try {
         if ($method === 'POST') require_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
+        if ($path === '/api/assets' && $method === 'GET') {
+            json_response(['assets' => AssetService::listOwned($database, $user)]);
+        }
         if ($path === '/api/assets' && $method === 'POST') {
             if (!isset($_FILES['asset']) || !is_array($_FILES['asset'])) json_response(['error' => 'asset_required'], 400);
-            json_response(['asset' => AssetService::storeUpload($database, $user, $_FILES['asset'])], 201);
+            $asset = AssetService::storeUpload($database, $user, $_FILES['asset']);
+            json_response(['asset' => ['id' => $asset['id']]], 201);
         }
         if ($path === '/api/mats' && $method === 'POST') {
             $body = json_body();
@@ -382,11 +394,11 @@ if (str_starts_with($path, '/api/')) {
         }
         if ($path === '/api/templates' && $method === 'POST') {
             $body = json_body();
-            json_response(['template' => TemplateService::create($database, $user, (string) ($body['name'] ?? ''))], 201);
+            json_response(['template' => TemplateService::create($database, $user, is_string($body['name'] ?? null) ? $body['name'] : '', is_array($body['definitions'] ?? null) ? $body['definitions'] : [], optional_string_field($body, 'default_back_asset_id'))], 201);
         }
         if (preg_match('#^/api/templates/([0-9a-fA-F-]{36})/versions$#', $path, $matches) && $method === 'POST') {
             $body = json_body();
-            json_response(['version' => TemplateService::createVersion($database, $user, $matches[1], is_array($body['definitions'] ?? null) ? $body['definitions'] : [])], 201);
+            json_response(['version' => TemplateService::createVersion($database, $user, $matches[1], is_array($body['definitions'] ?? null) ? $body['definitions'] : [], optional_string_field($body, 'default_back_asset_id'))], 201);
         }
         if ($path === '/api/sessions' && $method === 'POST') {
             $body = json_body();

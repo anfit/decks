@@ -23,32 +23,82 @@ final class AssetService
             throw new RuntimeException('Only bounded JPEG, PNG or WebP images are accepted.');
         }
         $hash = hash_file('sha256', $upload['tmp_name']);
-        $existing = $database->prepare('SELECT id, storage_key, mime_type, byte_size, width, height FROM assets WHERE content_hash = :hash');
-        $existing->execute(['hash' => $hash]);
-        $row = $existing->fetch();
-        if (is_array($row)) return ['id' => (string) $row['id'], 'storage_key' => (string) $row['storage_key']];
+        if (!is_string($hash)) throw new RuntimeException('The image could not be read.');
         $root = getenv('DECKS_ASSET_PATH') ?: dirname(__DIR__) . '/storage/assets';
         if (!is_dir($root) && !mkdir($root, 0750, true) && !is_dir($root)) throw new RuntimeException('Asset storage is unavailable.');
         $storageKey = $hash . '.' . $allowed[$mime];
         $destination = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $storageKey;
-        if (!copy($upload['tmp_name'], $destination)) throw new RuntimeException('The image could not be stored.');
+        $createdFile = false;
+        $partialFile = false;
+        $database->beginTransaction();
         try {
+            $database->prepare('SELECT pg_advisory_xact_lock(hashtext(:content_hash))')->execute(['content_hash' => $hash]);
+            $existing = $database->prepare('SELECT id, storage_key FROM assets WHERE content_hash = :hash FOR UPDATE');
+            $existing->execute(['hash' => $hash]);
+            $row = $existing->fetch();
+            if (is_array($row)) {
+                $storageKey = (string) $row['storage_key'];
+                $destination = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . basename($storageKey);
+                if (!is_file($destination)) {
+                    $partialFile = true;
+                    if (!copy($upload['tmp_name'], $destination)) throw new RuntimeException('The image could not be stored.');
+                    $partialFile = false;
+                } elseif (!hash_equals($hash, (string) hash_file('sha256', $destination))) {
+                    throw new RuntimeException('Stored image bytes failed their content check.');
+                }
+                $database->prepare('INSERT INTO asset_owners(asset_id, user_id) VALUES (:asset, :owner) ON CONFLICT DO NOTHING')
+                    ->execute(['asset' => $row['id'], 'owner' => $user['id']]);
+                $database->commit();
+                return ['id' => (string) $row['id'], 'storage_key' => $storageKey];
+            }
+            if (is_file($destination)) {
+                if (!hash_equals($hash, (string) hash_file('sha256', $destination))) throw new RuntimeException('Stored image bytes failed their content check.');
+            } else {
+                $createdFile = true;
+                if (!copy($upload['tmp_name'], $destination)) throw new RuntimeException('The image could not be stored.');
+            }
             $insert = $database->prepare(
                 'INSERT INTO assets(owner_user_id, content_hash, storage_key, mime_type, byte_size, width, height)
                  VALUES (:owner, :hash, :storage_key, :mime, :size, :width, :height) RETURNING id',
             );
             $insert->execute(['owner' => $user['id'], 'hash' => $hash, 'storage_key' => $storageKey, 'mime' => $mime, 'size' => $size, 'width' => (int) $info[0], 'height' => (int) $info[1]]);
-            $created = $insert->fetch();
-            return ['id' => (string) $created['id'], 'storage_key' => $storageKey];
+            $assetId = (string) $insert->fetchColumn();
+            $database->prepare('INSERT INTO asset_owners(asset_id, user_id) VALUES (:asset, :owner)')
+                ->execute(['asset' => $assetId, 'owner' => $user['id']]);
+            $database->commit();
+            return ['id' => $assetId, 'storage_key' => $storageKey];
         } catch (\Throwable $error) {
-            @unlink($destination);
+            if ($database->inTransaction()) $database->rollBack();
+            if (($createdFile || $partialFile) && is_file($destination)) @unlink($destination);
             throw $error;
         }
     }
 
+    /** List only assets explicitly available to this account, never internal storage keys. */
+    public static function listOwned(PDO $database, array $user): array
+    {
+        $statement = $database->prepare(
+            'SELECT a.id, a.mime_type, a.byte_size, a.width, a.height, a.created_at
+             FROM assets a JOIN asset_owners o ON o.asset_id = a.id
+             WHERE o.user_id = :owner ORDER BY a.created_at DESC, a.id',
+        );
+        $statement->execute(['owner' => $user['id']]);
+        return array_map(static fn (array $row): array => [
+            'id' => (string) $row['id'], 'mime_type' => (string) $row['mime_type'], 'byte_size' => (int) $row['byte_size'],
+            'width' => (int) $row['width'], 'height' => (int) $row['height'], 'created_at' => (string) $row['created_at'],
+        ], $statement->fetchAll());
+    }
+
+    public static function owns(PDO $database, string $userId, string $assetId): bool
+    {
+        $statement = $database->prepare('SELECT 1 FROM asset_owners WHERE asset_id = :asset AND user_id = :owner');
+        $statement->execute(['asset' => $assetId, 'owner' => $userId]);
+        return $statement->fetchColumn() !== false;
+    }
+
     public static function pathForOwner(PDO $database, array $user, string $assetId): array
     {
-        $statement = $database->prepare('SELECT * FROM assets WHERE id = :id AND owner_user_id = :owner');
+        $statement = $database->prepare('SELECT a.* FROM assets a JOIN asset_owners o ON o.asset_id = a.id WHERE a.id = :id AND o.user_id = :owner');
         $statement->execute(['id' => $assetId, 'owner' => $user['id']]);
         $asset = $statement->fetch();
         if (!is_array($asset)) throw new RuntimeException('Asset not found.');

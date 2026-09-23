@@ -26,6 +26,9 @@ final class ActionService
             if (!is_array($session)) throw new RuntimeException('Session not found.');
             $member = SessionService::membership($database, $sessionId, (string) $user['id']);
             if ($member === null) throw new RuntimeException('Active table membership required.');
+            if (filter_var($session['interaction_frozen'], FILTER_VALIDATE_BOOLEAN) && !self::allowedWhileFrozen($type, $member)) {
+                throw new RuntimeException('Table interaction is frozen by the host.');
+            }
             foreach (self::requiredCapabilities($type, $payload) as $requiredCapability) {
                 if (!SessionService::hasCapability($member, $requiredCapability)) throw new RuntimeException('This participant is not allowed to perform that action.');
             }
@@ -42,28 +45,35 @@ final class ActionService
                 return ['status' => (string) $prior['status'], 'revision' => (int) $prior['revision'], 'result' => json_decode((string) $prior['result'], true, 512, JSON_THROW_ON_ERROR), 'duplicate' => true];
             }
             if ($session['status'] === 'ended' && !in_array($type, ['leave_session', 'reset_session'], true)) throw new RuntimeException('Session has ended.');
-            if (in_array($type, ['create_zone', 'update_zone', 'delete_zone', 'lock_zone', 'unlock_zone', 'lock_table', 'unlock_table'], true) && (!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision']))) {
-                throw new RuntimeException('Expected session revision is required for zone and table lock changes.');
+            if (in_array($type, ['create_zone', 'update_zone', 'delete_zone', 'lock_zone', 'unlock_zone', 'lock_table', 'unlock_table', 'freeze_table', 'unfreeze_table'], true) && (!array_key_exists('expected_session_revision', $request) || !is_int($request['expected_session_revision']))) {
+                throw new RuntimeException('Expected session revision is required for zone, table lock, and freeze changes.');
             }
             if (array_key_exists('expected_session_revision', $request) && $request['expected_session_revision'] !== null && (int) $request['expected_session_revision'] !== (int) $session['revision']) {
                 throw new RuntimeException('Session changed; refresh and try again.');
             }
             $result = self::apply($database, $session, $member, $user, $type, $payload);
-            $database->prepare('UPDATE sessions SET revision = revision + 1, last_activity_at = now() WHERE id = :id')
-                ->execute(['id' => $sessionId]);
-            $revision = (int) $session['revision'] + 1;
-            $event = $database->prepare(
-                'INSERT INTO session_events(session_id, revision, actor_user_id, action_type, public_payload)
-                 VALUES (:session, :revision, :actor, :type, CAST(:payload AS jsonb))',
-            );
-            $event->execute(['session' => $sessionId, 'revision' => $revision, 'actor' => $user['id'], 'type' => $type, 'payload' => json_encode(self::sanitizeEvent($type, $result), JSON_THROW_ON_ERROR)]);
+            $noChange = ($result['_no_change'] ?? false) === true;
+            unset($result['_no_change']);
+            $revision = (int) $session['revision'];
+            if (!$noChange) {
+                $database->prepare('UPDATE sessions SET revision = revision + 1, last_activity_at = now() WHERE id = :id')
+                    ->execute(['id' => $sessionId]);
+                $revision++;
+                $event = $database->prepare(
+                    'INSERT INTO session_events(session_id, revision, actor_user_id, action_type, public_payload)
+                     VALUES (:session, :revision, :actor, :type, CAST(:payload AS jsonb))',
+                );
+                $event->execute(['session' => $sessionId, 'revision' => $revision, 'actor' => $user['id'], 'type' => $type, 'payload' => json_encode(self::sanitizeEvent($type, $result), JSON_THROW_ON_ERROR)]);
+            }
             $stored = $database->prepare(
                 'INSERT INTO processed_actions(session_id, actor_user_id, action_id, request_hash, revision, status, result)
                  VALUES (:session, :actor, :action, :hash, :revision, \'accepted\', CAST(:result AS jsonb))',
             );
             $stored->execute(['session' => $sessionId, 'actor' => $user['id'], 'action' => $actionId, 'hash' => $requestHash, 'revision' => $revision, 'result' => json_encode($result, JSON_THROW_ON_ERROR)]);
-            $database->prepare("SELECT pg_notify('decks_session_changed', :payload)")
-                ->execute(['payload' => json_encode(['session_id' => $sessionId, 'revision' => $revision], JSON_THROW_ON_ERROR)]);
+            if (!$noChange) {
+                $database->prepare("SELECT pg_notify('decks_session_changed', :payload)")
+                    ->execute(['payload' => json_encode(['session_id' => $sessionId, 'revision' => $revision], JSON_THROW_ON_ERROR)]);
+            }
             $database->commit();
             return ['status' => 'accepted', 'revision' => $revision, 'result' => $result, 'duplicate' => false];
         } catch (\Throwable $error) {
@@ -76,7 +86,7 @@ final class ActionService
     {
         $member = SessionService::membership($database, $sessionId, $userId);
         if ($member === null) throw new RuntimeException('Active table membership required.');
-        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at, access_settings, locked_by FROM sessions WHERE id = :id');
+        $sessionStatement = $database->prepare('SELECT id, title, status, host_user_id, revision, created_at, last_activity_at, access_settings, locked_by, interaction_frozen FROM sessions WHERE id = :id');
         $sessionStatement->execute(['id' => $sessionId]);
         $session = $sessionStatement->fetch();
         if (!is_array($session)) throw new RuntimeException('Session not found.');
@@ -163,7 +173,7 @@ final class ActionService
         }
         return [
             'revision' => (int) $session['revision'],
-            'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at'], 'locked' => $session['locked_by'] !== null, 'locked_by_current' => $session['locked_by'] !== null && (string) $session['locked_by'] === $userId],
+            'session' => ['id' => (string) $session['id'], 'title' => $session['title'], 'status' => (string) $session['status'], 'host_user_id' => (string) $session['host_user_id'], 'created_at' => (string) $session['created_at'], 'last_activity_at' => (string) $session['last_activity_at'], 'locked' => $session['locked_by'] !== null, 'locked_by_current' => $session['locked_by'] !== null && (string) $session['locked_by'] === $userId, 'interaction_frozen' => filter_var($session['interaction_frozen'], FILTER_VALIDATE_BOOLEAN)],
             'configuration' => json_decode((string) $session['access_settings'], true, 512, JSON_THROW_ON_ERROR),
             'participants' => array_map(static function (array $row) use ($userId, $handCounts, $member): array {
                 $isCurrent = (string) $row['user_id'] === (string) $userId;
@@ -198,7 +208,7 @@ final class ActionService
     {
         return match ($type) {
             'leave_session' => null,
-            'start_session', 'end_session', 'reset_session', 'collect_all', 'configure_table', 'instantiate_deck' => 'session.manage',
+            'start_session', 'end_session', 'reset_session', 'collect_all', 'configure_table', 'instantiate_deck', 'freeze_table', 'unfreeze_table' => 'session.manage',
             'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities' => 'participant.manage',
             'create_zone', 'update_zone', 'delete_zone' => 'zone.manage',
             'draw_top', 'draw_bottom', 'draw_n', 'return_top', 'return_bottom', 'return_to_source_decks', 'shuffle_deck', 'cut_deck', 'insert_cards', 'split_deck', 'deal' => 'deck.manage',
@@ -229,11 +239,22 @@ final class ActionService
         return array_values(array_unique($required));
     }
 
+    private static function allowedWhileFrozen(string $type, array $member): bool
+    {
+        if ($type === 'leave_session') return true;
+        if (($member['role'] ?? '') !== 'host') return false;
+        return in_array($type, [
+            'freeze_table', 'unfreeze_table', 'end_session', 'reset_session',
+            'transfer_host', 'remove_participant', 'restore_participant', 'set_participant_capabilities', 'unlock_table',
+        ], true);
+    }
+
     private static function apply(PDO $database, array $session, array $member, array $user, string $type, array $payload): array
     {
         return match ($type) {
             'start_session' => self::setStatus($database, $session, $member, 'active'),
             'end_session' => self::setStatus($database, $session, $member, 'ended'),
+            'freeze_table', 'unfreeze_table' => self::setInteractionFrozen($database, $session, $member, $type === 'freeze_table'),
             'leave_session' => self::leave($database, $member),
             'transfer_host' => SessionService::transferHost($database, $session, $member, $payload),
             'remove_participant' => SessionService::removeParticipant($database, $session, $member, $payload),
@@ -309,6 +330,16 @@ final class ActionService
         return ['session_id' => (string) $session['id'], 'status' => $status];
     }
 
+    private static function setInteractionFrozen(PDO $database, array $session, array $member, bool $freeze): array
+    {
+        if (($member['role'] ?? '') !== 'host' || $session['status'] === 'ended') throw new RuntimeException('Only the host can freeze an available table.');
+        $current = filter_var($session['interaction_frozen'], FILTER_VALIDATE_BOOLEAN);
+        if ($current === $freeze) return ['session_id' => (string) $session['id'], 'interaction_frozen' => $freeze, '_no_change' => true];
+        $database->prepare('UPDATE sessions SET interaction_frozen = :frozen WHERE id = :id')
+            ->execute(['frozen' => $freeze, 'id' => $session['id']]);
+        return ['session_id' => (string) $session['id'], 'interaction_frozen' => $freeze];
+    }
+
     private static function leave(PDO $database, array $member): array
     {
         $database->prepare('UPDATE session_participants SET removed_at = now() WHERE id = :id')->execute(['id' => $member['id']]);
@@ -351,7 +382,7 @@ final class ActionService
         $database->prepare('UPDATE session_decks SET locked_by = NULL, version = version + 1 WHERE session_id = :session')->execute(['session' => $session['id']]);
         $database->prepare('UPDATE session_zones SET locked_by = NULL, locked = false WHERE session_id = :session')->execute(['session' => $session['id']]);
         $result = self::collectAll($database, $session, $member);
-        $database->prepare("UPDATE sessions SET status = 'lobby', frozen_at = NULL, ended_at = NULL WHERE id = :id")->execute(['id' => $session['id']]);
+        $database->prepare("UPDATE sessions SET status = 'lobby', frozen_at = NULL, interaction_frozen = false, ended_at = NULL WHERE id = :id")->execute(['id' => $session['id']]);
         $initial = $database->prepare('SELECT initial_state FROM sessions WHERE id = :id');
         $initial->execute(['id' => $session['id']]);
         $initialState = json_decode((string) $initial->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);

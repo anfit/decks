@@ -1,10 +1,12 @@
 import "./styles.css";
+import { renderTemplateEditor } from "./template-editor";
 
 type User = { id: string; email: string; role: string };
-type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string; locked: boolean; locked_by_current: boolean };
+type Session = { id: string; title: string | null; status: string; revision: number; host_user_id: string; locked: boolean; locked_by_current: boolean; interaction_frozen: boolean };
 type Preset = { id: string; name: string; template_version_id: string; mat_version_id: string | null; configuration: Record<string, unknown> };
 type TemplateVersion = { id: string; version: number; definition_count: number };
 type Template = { id: string; name: string; versions: TemplateVersion[] };
+type OwnedAsset = { id: string; mime_type: string; byte_size: number; width: number; height: number; created_at: string };
 type Deck = { id: string; label: string | null; card_count: number; version: number; locked: boolean; locked_by_current: boolean };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; locked_by_current: boolean; version: number };
 type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; has_back_art?: boolean; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number; locked: boolean; locked_by_current: boolean };
@@ -24,6 +26,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   start_session: "started the session", end_session: "ended the session", leave_session: "left the session",
   transfer_host: "transferred the host role", remove_participant: "removed a participant", restore_participant: "restored a participant",
   set_participant_capabilities: "changed participant permissions", instantiate_deck: "added a deck", configure_table: "configured the table",
+  freeze_table: "froze table interaction", unfreeze_table: "resumed table interaction",
   draw_top: "drew a card from a deck", draw_bottom: "drew a card from a deck", draw_n: "drew cards from a deck", deal: "dealt cards",
   return_top: "returned cards to a deck", return_bottom: "returned cards to a deck", return_to_source_decks: "returned cards to their decks", shuffle_deck: "shuffled a deck", cut_deck: "cut a deck",
   insert_cards: "inserted cards into a deck", split_deck: "split a deck", move_card: "moved a card", move_cards: "moved cards",
@@ -75,7 +78,7 @@ function setStatus(message: string, state: "ok" | "error" | "pending" = "pending
 async function api(path: string, init: RequestInit = {}): Promise<any> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (init.method && init.method !== "GET") headers.set("X-CSRF-Token", csrf);
   const response = await fetch(path, { ...init, headers });
   const body: any = await response.json().catch(() => ({}));
@@ -232,12 +235,27 @@ async function sessionAction(sessionId: string, revision: number, type: string, 
 
 async function loadHomeData(preset: HTMLSelectElement, deckChoices: HTMLElement, deckTemplateVersions: Array<{ id: string; label: string }>, fillDeckSelector: (select: HTMLSelectElement) => void): Promise<void> {
   try {
-    const [sessions, presets, templates] = await Promise.all([api("/api/sessions"), api("/api/mats-and-presets"), api("/api/templates")]);
+    const [sessions, presets, templates, ownedAssets] = await Promise.all([api("/api/sessions"), api("/api/mats-and-presets"), api("/api/templates"), api("/api/assets")]);
     if (currentState !== null || !workspace) return;
     for (const item of (presets.presets as Preset[] ?? [])) {
       const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; option.dataset.templateVersion = item.template_version_id; preset.append(option);
     }
-    for (const item of (templates.templates as Template[] ?? [])) {
+    const initialTemplates = (templates.templates as Template[] ?? []);
+    const templateEditor = renderTemplateEditor(initialTemplates, (ownedAssets.assets as OwnedAsset[] ?? []), api, (updatedTemplates) => {
+      deckTemplateVersions.splice(0, deckTemplateVersions.length);
+      for (const item of updatedTemplates) {
+        for (const version of item.versions ?? []) {
+          if (version.definition_count < 1) continue;
+          deckTemplateVersions.push({ id: version.id, label: `${item.name} · v${version.version} · ${version.definition_count} definitions` });
+        }
+      }
+      deckChoices.querySelectorAll<HTMLSelectElement>('select[name="template"]').forEach((select) => {
+        const selected = select.value;
+        fillDeckSelector(select);
+        if (deckTemplateVersions.some((version) => version.id === selected)) select.value = selected;
+      });
+    });
+    for (const item of initialTemplates) {
       for (const version of item.versions ?? []) {
         if (version.definition_count < 1) continue;
         deckTemplateVersions.push({ id: version.id, label: `${item.name} · v${version.version} · ${version.definition_count} definitions` });
@@ -264,7 +282,7 @@ async function loadHomeData(preset: HTMLSelectElement, deckChoices: HTMLElement,
       }
     };
     search.addEventListener("input", renderRows); renderRows();
-    workspace.append(section);
+    workspace.append(templateEditor, section);
   } catch (error) {
     setStatus(`Setup unavailable: ${(error as Error).message}`, "error");
   }
@@ -547,7 +565,7 @@ function renderParticipantControls(state: State): HTMLElement | null {
 function renderRemovedCardControls(state: State): HTMLElement | null {
   const current = state.participants.find((participant) => participant.is_current);
   const removedCards = state.removed_cards ?? [];
-  if (state.session.status === "ended" || current?.role !== "host" || !currentCan("card.manage") || removedCards.length === 0) return null;
+  if (state.session.status === "ended" || state.session.interaction_frozen || current?.role !== "host" || !currentCan("card.manage") || removedCards.length === 0) return null;
   const panel = document.createElement("section"); panel.className = "panel removed-card-controls";
   const heading = document.createElement("h3"); heading.textContent = `Removed cards (${removedCards.length})`; panel.append(heading);
   const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = "Cards are unnamed here to protect hidden information. Restoration returns each card to its source deck."; panel.append(hint);
@@ -710,6 +728,10 @@ function renderTable(state: State): void {
   const handCardCount = state.participants.reduce((sum, participant) => sum + participant.hand_count, 0);
   const totalCardCount = state.containers.decks.reduce((sum, deck) => sum + deck.card_count, 0) + state.containers.piles.reduce((sum, pile) => sum + pile.card_count, 0) + tableCardCount + handCardCount;
   const meta = document.createElement("p"); meta.className = "muted"; meta.textContent = `${state.session.status} · revision ${state.revision} · ${totalCardCount} cards`; workspace.append(meta);
+  if (state.session.interaction_frozen && state.session.status !== "ended") {
+    const frozen = document.createElement("p"); frozen.className = "flash interaction-frozen"; frozen.setAttribute("role", "status");
+    frozen.textContent = "Table interaction is frozen by the host. Cards and piles are read-only until the host resumes play."; workspace.append(frozen);
+  }
   if (state.session.locked && !state.session.locked_by_current) {
     const locked = document.createElement("p"); locked.className = "flash"; locked.setAttribute("role", "status"); locked.textContent = "This table is locked by another participant. You can still view it or leave."; workspace.append(locked);
   }
@@ -720,21 +742,25 @@ function renderTable(state: State): void {
   workspace.append(players);
   const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
   const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
-  const zoneEditor = renderZoneEditor(state); if (zoneEditor) workspace.append(zoneEditor);
-  const zoneLocks = renderZoneLockControls(state); if (zoneLocks) workspace.append(zoneLocks);
+  const zoneEditor = state.session.interaction_frozen ? null : renderZoneEditor(state); if (zoneEditor) workspace.append(zoneEditor);
+  const zoneLocks = state.session.interaction_frozen ? null : renderZoneLockControls(state); if (zoneLocks) workspace.append(zoneLocks);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
-  if (currentCan("lock.manage") && currentCan("session.manage") && state.session.status !== "ended") {
+  if (currentCan("lock.manage") && currentCan("session.manage") && state.session.status !== "ended" && (!state.session.interaction_frozen || state.session.locked)) {
     const lockType = state.session.locked ? "unlock_table" : "lock_table";
     controls.append(button(state.session.locked ? "Unlock table" : "Lock table", () => void action(state.session.id, lockType, {}), true));
   }
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
-    if (state.session.status === "lobby") controls.append(button("Start session", () => void action(state.session.id, "start_session", {})));
+    if (state.session.status !== "ended") {
+      const freezeType = state.session.interaction_frozen ? "unfreeze_table" : "freeze_table";
+      controls.append(button(state.session.interaction_frozen ? "Unfreeze table" : "Freeze table", () => void action(state.session.id, freezeType, {}), true));
+    }
+    if (state.session.status === "lobby" && !state.session.interaction_frozen) controls.append(button("Start session", () => void action(state.session.id, "start_session", {})));
     if (state.session.status === "active") controls.append(button("End session", () => {
       if (window.confirm("End this session for everyone? Participants will no longer be able to change the table.")) void action(state.session.id, "end_session", {});
     }, true));
   }
-  if (currentCan("card.manage") && state.session.status !== "ended") {
+  if (currentCan("card.manage") && state.session.status !== "ended" && !state.session.interaction_frozen) {
     const selectCards = button("Select cards", () => {
       selectionMode = !selectionMode;
       selectedCardIds.clear();
@@ -785,22 +811,24 @@ function renderTable(state: State): void {
     }
     controls.append(selectionTools);
   }
-  if (state.containers.decks.length > 0 && currentCan("deck.manage")) {
+  if (state.containers.decks.length > 0 && currentCan("deck.manage") && !state.session.interaction_frozen) {
     const recipients = state.participants.filter((participant) => participant.role === "host" || participant.role === "player").map((participant) => participant.id);
     for (const deck of state.containers.decks) {
       if (recipients.length > 1 && (!deck.locked || deck.locked_by_current)) controls.append(button(`Deal one each from ${deck.label || "deck"}`, () => void action(state.session.id, "deal", { deck_id: deck.id, participant_ids: recipients, count: 1, mode: "per_participant" })));
     }
   }
   if (currentParticipant?.role === "host" && currentCan("session.manage")) {
-    const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
-    controls.append(labelled("Collect mode", collectMode));
-    controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
+    if (!state.session.interaction_frozen) {
+      const collectMode = document.createElement("select"); collectMode.name = "collect-mode"; collectMode.innerHTML = '<option value="original">Collect original</option><option value="shuffle">Collect and shuffle</option><option value="preserve">Collect preserve</option>';
+      controls.append(labelled("Collect mode", collectMode));
+      controls.append(button("Collect all", () => void action(state.session.id, "collect_all", { mode: collectMode.value }), true));
+    }
     controls.append(button("Reset table", () => { if (window.confirm("Reset the table to the lobby and collect every card?")) void action(state.session.id, "reset_session", { shuffle: true }); }, true));
   }
-  if (currentCan("pile.manage")) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
-  for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
+  if (currentCan("pile.manage") && !state.session.interaction_frozen) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
+  if (!state.session.interaction_frozen) for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
   workspace.append(controls);
-  for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
+  if (!state.session.interaction_frozen) for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
   workspace.append(renderRecentActions(state));
   renderBoard(state);
   if (state.session.locked && !state.session.locked_by_current) {
@@ -847,7 +875,7 @@ function renderBoard(state: State): void {
     const empty = document.createElement("p"); empty.className = "table-empty"; empty.textContent = "Draw or play a card to place it here."; canvas.append(empty);
   }
   state.zones.forEach((zone) => canvas.append(renderZoneOverlay(zone)));
-  const tableWritable = !state.session.locked || state.session.locked_by_current;
+  const tableWritable = !state.session.interaction_frozen && (!state.session.locked || state.session.locked_by_current);
   const canManageCards = currentCan("card.manage") && tableWritable;
   const canManagePiles = currentCan("pile.manage") && tableWritable;
   state.containers.piles.forEach((pile) => canvas.append(renderPile(state, pile, canManagePiles)));

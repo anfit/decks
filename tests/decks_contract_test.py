@@ -535,6 +535,52 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("FOREIGN KEY (session_id, pile_id)", source)
         self.assertIn("card_location_shape", source)
 
+    def test_template_authoring_keeps_assets_owner_scoped_and_versions_immutable(self) -> None:
+        assets = read_text("src/AssetService.php")
+        templates = read_text("src/TemplateService.php")
+        routes = read_text("public/index.php")
+        frontend = read_text("frontend/src/template-editor.ts")
+        migration = read_text("migrations/007_asset_ownership.sql")
+        mats = read_text("src/MatPresetService.php")
+        self.assertIn("CREATE TABLE asset_owners", migration)
+        self.assertIn("pg_advisory_xact_lock(hashtext(:content_hash))", assets)
+        self.assertIn("INSERT INTO asset_owners(asset_id, user_id)", assets)
+        self.assertIn("a.* FROM assets a JOIN asset_owners", assets)
+        self.assertIn("SELECT count(DISTINCT asset_id) FROM asset_owners", templates)
+        self.assertIn("default_back_asset_id", templates)
+        self.assertIn("AssetService::owns", mats)
+        self.assertIn("AssetService::listOwned", routes)
+        self.assertIn("['asset' => ['id' => $asset['id']]", routes)
+        self.assertIn('api("/api/assets"', frontend)
+        self.assertIn('api("/api/templates"', frontend)
+        self.assertIn("Add version to", frontend)
+        self.assertIn("Upload new image", frontend)
+        self.assertIn("Move card", frontend)
+        self.assertNotIn("storage_key", frontend)
+
+    def test_host_freeze_blocks_gameplay_before_idempotency_and_resets_cleanly(self) -> None:
+        action = read_text("src/ActionService.php")
+        frontend = read_text("frontend/src/main.ts")
+        spec = read_text("spec/23-host-interaction-freeze.md")
+        migration = read_text("migrations/008_session_interaction_freeze.sql")
+        freeze_check = "if (filter_var($session['interaction_frozen'], FILTER_VALIDATE_BOOLEAN)"
+        self.assertIn("ADD COLUMN interaction_frozen boolean NOT NULL DEFAULT false", migration)
+        self.assertLess(action.index(freeze_check), action.index("$duplicate = $database->prepare"))
+        self.assertIn("private static function allowedWhileFrozen", action)
+        self.assertIn("'freeze_table', 'unfreeze_table' => self::setInteractionFrozen", action)
+        self.assertIn("$result['_no_change']", action)
+        self.assertIn("interaction_frozen = false", action)
+        self.assertIn("'interaction_frozen' => filter_var", action)
+        self.assertIn('"Freeze table"', frontend)
+        self.assertIn('"Unfreeze table"', frontend)
+        self.assertIn("interaction_frozen", frontend)
+        self.assertIn("including the host", spec)
+        allowed = action[action.index("private static function allowedWhileFrozen"):action.index("private static function apply")]
+        for forbidden in ("'collect_all'", "'create_zone'", "'update_zone'", "'delete_zone'", "'instantiate_deck'", "'configure_table'"):
+            self.assertNotIn(forbidden, allowed)
+        for permitted in ("'unfreeze_table'", "'end_session'", "'reset_session'", "'remove_participant'", "'restore_participant'", "'set_participant_capabilities'", "'unlock_table'"):
+            self.assertIn(permitted, allowed)
+
 
 if __name__ == "__main__":
     unittest.main()

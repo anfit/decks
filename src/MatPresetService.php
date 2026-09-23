@@ -14,11 +14,7 @@ final class MatPresetService
         $name = trim($name);
         if ($name === '' || mb_strlen($name) > 160) throw new RuntimeException('Mat name is invalid.');
         if (($width === null) !== ($height === null) || ($width !== null && ($width < 1 || $height < 1 || $width > 10000 || $height > 10000))) throw new RuntimeException('Mat dimensions are invalid.');
-        if ($assetId !== null) {
-            $asset = $database->prepare('SELECT id FROM assets WHERE id = :id AND owner_user_id = :owner');
-            $asset->execute(['id' => $assetId, 'owner' => $user['id']]);
-            if (!$asset->fetch()) throw new RuntimeException('Mat asset is not available.');
-        }
+        if ($assetId !== null && !AssetService::owns($database, (string) $user['id'], $assetId)) throw new RuntimeException('Mat asset is not available.');
         $statement = $database->prepare('INSERT INTO mat_versions(owner_user_id, name, background_asset_id, width, height, metadata) VALUES (:owner, :name, :asset, :width, :height, CAST(:metadata AS jsonb)) RETURNING id, created_at');
         $statement->execute(['owner' => $user['id'], 'name' => $name, 'asset' => $assetId, 'width' => $width, 'height' => $height, 'metadata' => json_encode(self::cleanMetadata($metadata), JSON_THROW_ON_ERROR)]);
         $row = $statement->fetch();
