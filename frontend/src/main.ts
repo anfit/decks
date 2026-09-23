@@ -1021,9 +1021,11 @@ function surfaceSelectionMode(enabled: boolean): void {
 
 function renderCard(card: Card, index: number, inHand = false, interactive = true): HTMLElement {
   const item = document.createElement("article");
-  item.className = `card ${card.face_state === "up" || inHand ? "face-up" : "face-down"}`;
+  const canSeeFront = card.face_state === "up" || inHand || (card.face_state === "private" && card.card_definition_id !== undefined);
+  item.className = `card ${canSeeFront ? "face-up" : "face-down"}`;
   if (interactive && !inHand) { item.tabIndex = 0; item.setAttribute("role", "button"); item.setAttribute("aria-pressed", "false"); }
-  item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : (inHand ? "Private card in your hand" : "Face-down card"));
+  const fallbackLabel = inHand ? "Private card in your hand" : card.face_state === "private" ? "Private table card" : canSeeFront ? "Face-up card" : "Face-down card";
+  item.setAttribute("aria-label", card.card_label ? `${card.card_label} card` : fallbackLabel);
   item.dataset.cardId = card.id;
   item.style.zIndex = String(card.z_index || index + 1);
   const x = card.x ?? 24 + (index % 8) * 74;
@@ -1071,8 +1073,15 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
       }
     });
   }
+  if (canSeeFront) {
+    const artwork = document.createElement("img");
+    artwork.className = "card-art"; artwork.alt = ""; artwork.draggable = false;
+    artwork.loading = "lazy"; artwork.decoding = "async"; artwork.referrerPolicy = "no-referrer";
+    artwork.src = `/protected-card-front/${encodeURIComponent(statefulSessionId())}/${encodeURIComponent(card.id)}`;
+    item.append(artwork);
+  }
   const label = document.createElement("strong");
-  label.textContent = card.card_label || (card.face_state === "private" ? "Private card" : "Face down");
+  label.textContent = card.card_label || fallbackLabel;
   item.append(label);
   return item;
 }

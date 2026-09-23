@@ -268,6 +268,26 @@ if (in_array($path, ['/login', '/accept-invitation', '/request-password-reset', 
     }
 }
 
+if (preg_match('#^/protected-card-front/([0-9a-fA-F-]{36})/([0-9a-fA-F-]{36})$#', $path, $matches)) {
+    start_secure_session();
+    $database = database();
+    $user = Security::currentUser($database);
+    if ($user === null) { http_response_code(404); exit; }
+    try {
+        $asset = AssetService::pathForCardFront($database, $user, $matches[1], $matches[2]);
+        header('Content-Type: ' . $asset['mime_type']);
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+        $prefix = getenv('DECKS_ASSET_HANDOFF_PREFIX');
+        if (is_string($prefix) && $prefix !== '') {
+            header('X-Accel-Redirect: ' . rtrim($prefix, '/') . '/' . basename($asset['storage_key']));
+            exit;
+        }
+        readfile($asset['path']);
+        exit;
+    } catch (Throwable) { http_response_code(404); exit; }
+}
+
 if (preg_match('#^/protected-assets/([0-9a-fA-F-]{36})$#', $path, $matches)) {
     start_secure_session();
     $database = database();

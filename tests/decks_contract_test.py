@@ -207,6 +207,30 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("Zoom is presentation-only", spec)
         self.assertIn("converts pointer deltas back to logical board coordinates", spec)
 
+    def test_card_front_art_is_projection_scoped_and_reauthorized_on_each_request(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        asset_service = read_text("src/AssetService.php")
+        routes = read_text("public/index.php")
+        spec = read_text("spec/03-identity-visibility.md")
+        protected_route = routes.split("/protected-card-front/", 1)[1].split("if (preg_match('#^/protected-assets/", 1)[0]
+        card_front_service = asset_service.split("public static function pathForCardFront(", 1)[1].split("\n    }", 1)[0]
+        for fragment in (
+            "JOIN session_participants p ON p.session_id = c.session_id",
+            "p.user_id = :user AND p.removed_at IS NULL",
+            "a.mime_type IN ('image/jpeg', 'image/png', 'image/webp')",
+            "c.location_type IN ('table', 'pile') AND c.face_state = 'up'",
+            "c.location_type = 'hand' AND c.hand_participant_id = p.id",
+            "c.location_type = 'table' AND c.face_state = 'private' AND c.owner_user_id = p.user_id",
+        ):
+            self.assertIn(fragment, card_front_service)
+        self.assertIn("AssetService::pathForCardFront($database, $user, $matches[1], $matches[2])", protected_route)
+        self.assertIn("Cache-Control: private, no-store", protected_route)
+        self.assertIn("http_response_code(404)", protected_route)
+        self.assertIn("card.face_state === \"private\" && card.card_definition_id !== undefined", frontend)
+        self.assertIn("/protected-card-front/${encodeURIComponent(statefulSessionId())}/${encodeURIComponent(card.id)}", frontend)
+        self.assertNotIn("front_asset_id", frontend)
+        self.assertIn("snapshot itself must not contain an asset ID or image URL", spec)
+
     def test_frontend_refresh_preserves_current_realtime_socket(self) -> None:
         frontend = read_text("frontend/src/main.ts")
         render_table = frontend.split("function renderTable(state: State): void {", 1)[1].split("\nfunction renderBoard", 1)[0]
