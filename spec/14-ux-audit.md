@@ -140,3 +140,15 @@ Keyboard flip and restore are usable and persisted (revision 30→31→32), but 
 ### UX disposition
 
 Prioritize the release mismatch and mutation-triggered realtime failure before broadening visual polish. Once the current source is actually served, accept its added controls in the browser and check their disabled/error states, keyboard reachability, hidden-data wording, and screen-reader labels. Separately improve the oversized home heading and table-list scanning, empty-hand contrast, table width/space use, meaningful card-back/art, and narrow-screen pan/zoom. The result remains **provisional**: only one authenticated browser at a desktop-sized viewport was checked, and the tested source-level controls are not visible in production.
+
+## Host participant administration follow-up — 2026-09-23
+
+Spec-first updates in `spec/15-session-setup-and-capabilities.md` (`d2fd63c`, `4c711f7`) define a host-only generic participant panel. Source commit `03b8de6` adds confirmation-gated host transfer/removal, generic restoration rows with a Player/Spectator role choice, and keeps capability choices in the same panel. It never renders account emails or raw IDs; only the authorized host receives opaque recovery action targets. Host transfer resets explicit overrides so the new host retains its recovery controls. The panel is hidden after session end.
+
+The source interaction passed 32/32 contract tests, TypeScript typecheck, production asset build and diff check. It has not been exercised in a browser or two-account session. Production remains behind source and the current shell lacks the trusted deploy configuration/toolchain; keep all participant operations in deployment acceptance and the UX result provisional.
+
+## Visual zone editor follow-up — 2026-09-23
+
+The committed `spec/08-presets-zones.md` contract now defines host-only lobby editing. Source commit `8678fbf` displays zones as named rectangles behind cards/piles and lets the host add, edit, and confirm deletion of zones using labeled inputs for geometry, priority and effect. Starting a session removes the editor and the server rejects any zone mutation after the lobby. The control passes 33/33 contract tests, TypeScript, Vite build and diff check.
+
+This interface has not been visually tested in a browser. Keep the overlay legibility, scrolling/overlap behavior, mobile fields, screen-reader labels, zone precedence and reset behavior in browser acceptance. Production remains on an older release and the current environment still lacks deployment access, so the UX audit remains provisional.

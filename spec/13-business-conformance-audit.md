@@ -133,6 +133,18 @@ The production browser findings in the audit below are unchanged: production had
 
 The business result remains **partial** until deployment, two-client acceptance, remaining MVP gaps, and the external launch gates are evidenced.
 
+## Host participant administration response — 2026-09-23
+
+Spec-first commits `d2fd63c` and `4c711f7` extend `spec/15-session-setup-and-capabilities.md` with the generic host-only remove/restore/transfer UI contract and a capability-reset invariant for host transfer. Source commit `03b8de6` projects removed non-host participants to an authorized host as opaque action IDs plus prior role only, adds confirmed participant removal and host transfer, allows role selection on restoration, hides controls for ended sessions, and clears stale explicit capability overrides on both participants when host role changes. The capability reset ensures the incoming host receives host defaults and the outgoing host receives player defaults. Public event sanitization continues to remove participant IDs.
+
+The source is pushed to `origin/master`; 32/32 contract tests, TypeScript typecheck, Vite production build, and `git diff --check` pass. The local host still lacks PHP/PostgreSQL and the trusted deployment environment, so no database transaction or browser test has accepted the new projection or controls. Treat participant administration as source-complete and retain it in two-account deployed acceptance.
+
+## Visual zone editor response — 2026-09-23
+
+Spec-first commits `d91aae6`, `24b9552`, and `5361231` update `spec/08-presets-zones.md` with a generic rectangle editor, bounded geometry/priority/effects, lobby-only configuration freeze, and mandatory current session-revision checks. Source commit `8678fbf` registers `update_zone`, validates same-session targets and normalized zone data, enforces host plus effective `zone.manage` authorization and lobby status in the service, rejects absent or malformed zone-action revisions, and exposes overlays plus add/edit/confirmed-delete controls only to authorized hosts while the table is in the lobby. Zone overlays are labeled, non-interactive, and contain no card or participant data.
+
+The latest source passes 33/33 contract tests, TypeScript typecheck, Vite production build, and `git diff --check`, and is pushed to `origin/master`. PHP lint/integration and browser acceptance remain unavailable here. The zone editor is source-complete; keep its geometry/effect behavior, lobby freeze, stale revision, capability denial, reset restoration and accessible overlay review in deployment acceptance.
+
 ## Source-deck return and composite-capability response — 2026-09-22
 
 Specs `07-table-interaction.md` and `19-capability-policy.md` were updated before implementation (`22581fc`, `2e56a4f`). Commit `02e1691` adds `return_to_source_decks`, an accessible selection-toolbar action for top or bottom placement. The server resolves source deck ids from durable card rows, validates the complete selected-version map and all card visibility/lock/location rules before grouping, performs the per-deck returns inside the enclosing session transaction, and returns only total count and position. The source deck association is not added to the snapshot or public event. The same commit enforces the documented composite capability matrix and hides pile draw/lock/collect affordances when their full capability set is absent. Validation passes 27/27 contract tests, TypeScript typecheck, Vite build and `git diff --check`; PHP CLI and PostgreSQL integration are unavailable locally.
