@@ -20,6 +20,8 @@ Card identity, location and face state are separate. Public face-up cards expose
 
 Projection code is allowlist-based and shared by snapshots, changes, action results, WebSocket notifications and history. It must not send hidden definition IDs, front URLs, private metadata, hidden order, peek results or raw historical secrets. Protected front assets are authorized per request and delivered through Nginx internal handoff; frontend CSS/DOM hiding is not a security boundary.
 
+The browser may construct a same-origin protected front-image request from the session and card handles already present in an authorized visible-card projection; the snapshot itself must not contain an asset ID or image URL. The route is bound to the exact session and card and resolves the front asset only on the server. It rechecks the enabled principal, active membership, current card location/face/owner and front-asset relationship on every request. Access is limited to a current participant viewing a face-up public table/pile card, their own hand card, or their own private table card. Hidden/deck/removed/foreign-private cards and non-members return the same 404. Responses are private and `no-store`; the owner-only asset preview route remains separate. The frontend adds the image only for a projection it is already allowed to display, with an empty alt attribute and the safe card label as the accessible name.
+
 Hand order is private card state: the snapshot may expose it only in the current owner's own-hand projection and must omit it from all public or other-participant views and events.
 
 ## Session/table revocation
