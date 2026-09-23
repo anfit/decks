@@ -83,4 +83,27 @@ final class AssetService
         if (!is_file($path)) throw new RuntimeException('Asset bytes are unavailable.');
         return ['path' => $path, 'storage_key' => (string) $asset['storage_key'], 'mime_type' => (string) $asset['mime_type']];
     }
+
+    public static function pathForCardBack(PDO $database, array $user, string $sessionId, string $cardId): array
+    {
+        $statement = $database->prepare(
+            "SELECT a.storage_key, a.mime_type
+             FROM session_cards c
+             JOIN card_definitions d ON d.id = c.card_definition_id
+             JOIN deck_template_versions v ON v.id = d.template_version_id
+             JOIN assets a ON a.id = COALESCE(d.back_asset_id, v.default_back_asset_id)
+             JOIN session_participants p ON p.session_id = c.session_id
+             WHERE c.session_id = :session AND c.id = :card AND p.user_id = :user AND p.removed_at IS NULL
+               AND c.location_type = 'table' AND c.face_state IN ('down', 'private')
+               AND a.mime_type IN ('image/jpeg', 'image/png', 'image/webp')
+             LIMIT 1",
+        );
+        $statement->execute(['session' => $sessionId, 'card' => $cardId, 'user' => $user['id']]);
+        $asset = $statement->fetch();
+        if (!is_array($asset)) throw new RuntimeException('Asset not found.');
+        $root = getenv('DECKS_ASSET_PATH') ?: dirname(__DIR__) . '/storage/assets';
+        $path = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . basename((string) $asset['storage_key']);
+        if (!is_file($path)) throw new RuntimeException('Asset bytes are unavailable.');
+        return ['path' => $path, 'storage_key' => (string) $asset['storage_key'], 'mime_type' => (string) $asset['mime_type']];
+    }
 }

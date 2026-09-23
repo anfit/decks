@@ -231,6 +231,32 @@ class DecksContractTest(unittest.TestCase):
         self.assertNotIn("front_asset_id", frontend)
         self.assertIn("snapshot itself must not contain an asset ID or image URL", spec)
 
+    def test_card_back_art_uses_session_card_lookup_and_never_projects_asset_ids(self) -> None:
+        frontend = read_text("frontend/src/main.ts")
+        action = read_text("src/ActionService.php")
+        asset_service = read_text("src/AssetService.php")
+        routes = read_text("public/index.php")
+        identity_spec = read_text("spec/03-identity-visibility.md")
+        asset_spec = read_text("spec/06-assets-templates.md")
+        back_service = asset_service.split("public static function pathForCardBack(", 1)[1].split("\n    }", 1)[0]
+        protected_route = routes.split("/protected-card-back/", 1)[1].split("if (preg_match('#^/protected-assets/", 1)[0]
+        for fragment in (
+            "p.user_id = :user AND p.removed_at IS NULL",
+            "c.location_type = 'table' AND c.face_state IN ('down', 'private')",
+            "COALESCE(d.back_asset_id, v.default_back_asset_id)",
+            "a.mime_type IN ('image/jpeg', 'image/png', 'image/webp')",
+        ):
+            self.assertIn(fragment, back_service)
+        self.assertIn("CASE WHEN COALESCE(d.back_asset_id, v.default_back_asset_id) IS NOT NULL THEN 1 ELSE 0 END AS has_back_art", action)
+        self.assertIn("$projected['has_back_art'] = true", action)
+        self.assertNotIn("'back_asset_id' =>", action)
+        self.assertIn("AssetService::pathForCardBack($database, $user, $matches[1], $matches[2])", protected_route)
+        self.assertIn("Cache-Control: private, no-store", protected_route)
+        self.assertIn("/protected-card-back/${encodeURIComponent(statefulSessionId())}/${encodeURIComponent(card.id)}", frontend)
+        self.assertIn("card.has_back_art", frontend)
+        self.assertIn("A session/card-bound protected back route", asset_spec)
+        self.assertIn("only a `has_back_art` boolean", identity_spec)
+
     def test_frontend_refresh_preserves_current_realtime_socket(self) -> None:
         frontend = read_text("frontend/src/main.ts")
         render_table = frontend.split("function renderTable(state: State): void {", 1)[1].split("\nfunction renderBoard", 1)[0]

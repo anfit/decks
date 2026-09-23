@@ -7,7 +7,7 @@ type TemplateVersion = { id: string; version: number; definition_count: number }
 type Template = { id: string; name: string; versions: TemplateVersion[] };
 type Deck = { id: string; label: string | null; card_count: number; version: number; locked: boolean; locked_by_current: boolean };
 type Pile = { id: string; card_count: number; label: string | null; x: number; y: number; rotation: number; z_index: number; locked: boolean; locked_by_current: boolean; version: number };
-type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number; locked: boolean; locked_by_current: boolean };
+type Card = { id: string; location_type: string; deck_id: string | null; pile_id: string | null; hand_participant_id: string | null; hand_order?: number; card_definition_id?: string; card_label?: string; has_back_art?: boolean; face_state: string; x: number | null; y: number | null; rotation: number; z_index: number; version: number; locked: boolean; locked_by_current: boolean };
 type ActionEvent = { revision: number; action_type: string; actor: "you" | "participant"; created_at: string };
 type Capability = "session.manage" | "participant.manage" | "zone.manage" | "deck.manage" | "card.manage" | "pile.manage" | "lock.manage" | "card.undo";
 type Participant = { id: string; role: string; is_current: boolean; hand_count: number; capabilities?: Partial<Record<Capability, boolean>> };
@@ -1139,6 +1139,13 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
     artwork.className = "card-art"; artwork.alt = ""; artwork.draggable = false;
     artwork.loading = "lazy"; artwork.decoding = "async"; artwork.referrerPolicy = "no-referrer";
     artwork.src = `/protected-card-front/${encodeURIComponent(statefulSessionId())}/${encodeURIComponent(card.id)}`;
+    item.append(artwork);
+  } else if (!inHand && card.has_back_art) {
+    const artwork = document.createElement("img");
+    artwork.className = "card-art card-back-art"; artwork.alt = ""; artwork.draggable = false;
+    artwork.loading = "lazy"; artwork.decoding = "async"; artwork.referrerPolicy = "no-referrer";
+    artwork.addEventListener("error", () => artwork.remove(), { once: true });
+    artwork.src = `/protected-card-back/${encodeURIComponent(statefulSessionId())}/${encodeURIComponent(card.id)}`;
     item.append(artwork);
   }
   const label = document.createElement("strong");

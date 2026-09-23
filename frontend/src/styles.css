@@ -81,6 +81,7 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .card.selected { outline: 4px solid #f2c14e; outline-offset: 3px; }
 .card:focus-visible { outline: 3px solid #f2c14e; outline-offset: 3px; }
 .card-art { display: block; width: 100%; max-height: 4.6rem; object-fit: contain; border-radius: .2rem; pointer-events: none; }
+.card-back-art { position: absolute; inset: .15rem; width: calc(100% - .3rem); height: calc(100% - .3rem); max-height: none; object-fit: cover; border-radius: .3rem; }
 .card strong { max-width: 100%; overflow: hidden; font-size: .68rem; overflow-wrap: anywhere; }
 .card.face-down { border-color: #9db3c7; background: repeating-linear-gradient(135deg, #315a80 0, #315a80 .25rem, #477ba8 .25rem, #477ba8 .5rem); color: #fff; }
 .card.face-down strong { visibility: hidden; }
