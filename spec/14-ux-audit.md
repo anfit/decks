@@ -121,6 +121,14 @@ Following spec-first commit `88f1c34`, source commit `50b9650` adds accessible m
 
 The remaining source-level UX backlog is selected private-hand reveal, public selected move/align and remove/restore, remaining pile reverse/flip/spread, participant recovery controls, zone editing/lock scopes, and the previously observed contrast, table-list density, card-art/back and narrow-viewport issues. The UX conclusion remains provisional until the exact deployed source passes authenticated two-client browser acceptance with keyboard and touch checks.
 
+## Source interaction follow-up — 2026-09-23
+
+The selected public-card movement/alignment controls (`fb6ea9a`), selected-card remove and host recovery controls (`ac1ad77`), and pile reverse/physical-flip/spread controls (`7bbdfbc`) close three previously listed source UX gaps. Directional group movement preserves relative positions and clamps at the table origin; left/top alignment requires a multi-card selection. Remove requires one selected card and confirmation. Restore rows are generic and host-only. Pile actions show explicit names and are disabled for empty or locked piles; spreading also explains the card-management permission requirement when unavailable. The 31/31 contract suite, TypeScript typecheck, and Vite build pass.
+
+No browser session was run against these controls. The signed-in production browser still reflects an older release and previously reported `Realtime connection closed; retrying` immediately after each mutation. The current local environment lacks the documented deploy variables and deployer/PHP commands, so this change is not live UX evidence. Pile mutation controls are shown only to participants with pile-management capability on unlocked piles; empty-pile actions that need cards are disabled.
+
+Keep these three features in exact-release acceptance. Remaining UX work is participant-management and zone affordances where required by the business scope, clearer home/table-list scanning, empty-hand contrast, table width/space use, meaningful backs/art, responsive pan/zoom and touch behavior, plus accessible keyboard/screen-reader review of the current source in a second-client session. The UX conclusion remains provisional.
+
 ## Live production UX audit — 2026-09-22
 
 At the browser's 1280×720 viewport, sign-in worked from the already populated Decks account form. The authenticated home places an oversized multi-line heading above the create/join controls, pushing the core forms below the first screen. The table list includes many duplicate or untitled verification tables, which makes finding a real session difficult. The home does expose clear field labels, a role selector, and an invitation route.

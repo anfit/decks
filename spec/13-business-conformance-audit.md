@@ -116,6 +116,23 @@ The authenticated production browser remains on `4e51b2d` / release `a70c82c42a9
 
 The business result remains **partial**. The backend design and source coverage are materially broader than at the initial audit, but production is stale, the observed live realtime status is failing, and the full UI MVP has not been exercised against the current source.
 
+## Selected card and pile controls completed in source — 2026-09-23
+
+The selected-table-card move/alignment slice (`2898b8d`, `fb6ea9a`), host-only removed-card recovery slice (`72d7f38`, `ac1ad77`), and pile reverse/flip/spread slice (`cd65e21`, `7bbdfbc`) close three gaps identified above. The selection toolbar moves a versioned group with a shared clamped delta and aligns left/top edges. Removal is confirmation-gated and versioned; only the host with effective card-management capability receives an opaque removed-card recovery roster, and restore chooses top/bottom/server shuffle without exposing card identity or origin. Reverse and physical flip require a valid observed pile version; spread additionally requires card-management capability, validates the target pile version and every contained card, and exposes only safe action metadata.
+
+The current source passes 31/31 Python contract tests, TypeScript typecheck, Vite production build, and `git diff --check`. `7bbdfbc` is pushed to `origin/master`. PHP CLI, PostgreSQL integration, and authenticated browser/runtime tools remain unavailable in this environment, so transaction execution and browser behavior are not established by these source checks.
+
+The production browser findings in the audit below are unchanged: production had an immediate reconnect/retry status after card mutations and was missing newer source controls. A fresh local probe on 2026-09-23 found no required `DECKS_*` deploy variables and no `php`, `vps-deployer`, or `vps_deployer` executable. Do not inspect `tmp/.env`; restore the trusted deploy environment and operator toolchain before attempting release. These controls are now source-complete and belong in deployment acceptance, not the source backlog.
+
+### Current remaining business work
+
+1. Restore the trusted OVH deployment environment/toolchain, refresh exact web/realtime/mail manifests, deploy the current commit, run remote PHP lint, and verify release provenance and health.
+2. On the exact release, run populated two-browser acceptance for role/privacy boundaries, host recovery, selected move/alignment and remove/restore, pile reverse/flip/spread and all prior deck/pile/hand operations, stale versions, locks, capability denial, action redaction, and WebSocket recovery. Use disposable fixtures and do not send email.
+3. Implement the still-unserved participant-management, freeze/lock-scope, and zone-editing requirements only after reviewing their committed behavior specs and clarifying any underspecified privacy/ownership semantics in the smallest spec first. Close demonstrable UX issues from `spec/14` (home density/list scanning, empty-state contrast, table space and responsive/touch interaction) in separate reviewable slices.
+4. Decide explicitly whether public/password access modes and creation-time permission presets are required beyond the existing scoped invitation flow. Keep SMTP/DKIM/DMARC and encrypted off-host backup/retention/restore as distinct operational gates.
+
+The business result remains **partial** until deployment, two-client acceptance, remaining MVP gaps, and the external launch gates are evidenced.
+
 ## Source-deck return and composite-capability response — 2026-09-22
 
 Specs `07-table-interaction.md` and `19-capability-policy.md` were updated before implementation (`22581fc`, `2e56a4f`). Commit `02e1691` adds `return_to_source_decks`, an accessible selection-toolbar action for top or bottom placement. The server resolves source deck ids from durable card rows, validates the complete selected-version map and all card visibility/lock/location rules before grouping, performs the per-deck returns inside the enclosing session transaction, and returns only total count and position. The source deck association is not added to the snapshot or public event. The same commit enforces the documented composite capability matrix and hides pile draw/lock/collect affordances when their full capability set is absent. Validation passes 27/27 contract tests, TypeScript typecheck, Vite build and `git diff --check`; PHP CLI and PostgreSQL integration are unavailable locally.
