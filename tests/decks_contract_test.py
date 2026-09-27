@@ -419,6 +419,16 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("exact expected-version entry for every selected card", action_spec)
         self.assertIn("hand-card-tools", styles)
 
+    def test_reorder_hand_accepts_permutations_but_rejects_duplicate_or_foreign_ids(self) -> None:
+        card = read_text("src/CardService.php")
+        spec = read_text("spec/04-actions.md")
+        reorder = card[card.index("public static function reorderHand"):card.index("public static function giveCards")]
+        self.assertIn("count($requested) !== count($requestedUnique)", reorder)
+        self.assertIn("sort($ownedSet, SORT_STRING)", reorder)
+        self.assertIn("sort($requestedSet, SORT_STRING)", reorder)
+        self.assertIn("$requestedSet !== $ownedSet", reorder)
+        self.assertIn("current hand exactly once", spec)
+
     def test_private_hand_selection_can_move_into_unlocked_pile_with_exact_versions(self) -> None:
         frontend = read_text("frontend/src/main.ts")
         pile = read_text("src/PileService.php")

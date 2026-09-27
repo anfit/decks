@@ -294,9 +294,32 @@ final class CardService
 
     public static function reorderHand(PDO $database, array $session, array $member, array $payload): array
     {
-        self::assertPlayer($session,$member); $ids=$payload['card_ids']??[]; if(!is_array($ids)||count($ids)>100)throw new RuntimeException('Card selection is invalid.');
-        $all=$database->prepare("SELECT * FROM session_cards WHERE session_id=:session AND location_type='hand' AND hand_participant_id=:participant ORDER BY order_key,id FOR UPDATE");$all->execute(['session'=>$session['id'],'participant'=>$member['id']]);$handRows=$all->fetchAll();foreach($handRows as $card)self::assertCanControl($card,$member);$owned=array_map(static fn(array $r):string=>(string)$r['id'],$handRows);$requested=array_values(array_unique(array_map('strval',$ids)));if($requested!==$owned)throw new RuntimeException('The hand changed; refresh and try again.');
-        $update=$database->prepare('UPDATE session_cards SET order_key=:order, version=version+1 WHERE id=:id');foreach($requested as $i=>$id)$update->execute(['order'=>($i+1)*1000,'id'=>$id]);self::bumpHand($database,$session['id'],(string)$member['id']);return ['participant_id'=>(string)$member['id'],'card_count'=>count($requested)];
+        self::assertPlayer($session, $member);
+        $ids = $payload['card_ids'] ?? [];
+        if (!is_array($ids) || count($ids) > 100 || array_filter($ids, static fn (mixed $id): bool => !is_string($id)) !== []) {
+            throw new RuntimeException('Card selection is invalid.');
+        }
+
+        $all = $database->prepare("SELECT * FROM session_cards WHERE session_id = :session AND location_type = 'hand' AND hand_participant_id = :participant ORDER BY order_key, id FOR UPDATE");
+        $all->execute(['session' => $session['id'], 'participant' => $member['id']]);
+        $handRows = $all->fetchAll();
+        foreach ($handRows as $card) self::assertCanControl($card, $member);
+
+        $owned = array_map(static fn (array $row): string => (string) $row['id'], $handRows);
+        $requested = array_values($ids);
+        $requestedUnique = array_values(array_unique($requested, SORT_STRING));
+        $ownedSet = $owned;
+        $requestedSet = $requested;
+        sort($ownedSet, SORT_STRING);
+        sort($requestedSet, SORT_STRING);
+        if (count($requested) !== count($requestedUnique) || $requestedSet !== $ownedSet) {
+            throw new RuntimeException('The hand changed; refresh and try again.');
+        }
+
+        $update = $database->prepare('UPDATE session_cards SET order_key = :order, version = version + 1 WHERE id = :id');
+        foreach ($requested as $index => $id) $update->execute(['order' => ($index + 1) * 1000, 'id' => $id]);
+        self::bumpHand($database, $session['id'], (string) $member['id']);
+        return ['participant_id' => (string) $member['id'], 'card_count' => count($requested)];
     }
 
     public static function giveCards(PDO $database, array $session, array $member, array $payload): array
