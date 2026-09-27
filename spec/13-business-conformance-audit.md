@@ -288,3 +288,11 @@ The revision-1 business source was opened in the internal browser and confirmed 
 ### Updated conformance result
 
 The live release proves useful core table and pile workflows, but it **fails** the host-freeze recovery requirement and does not expose the required hand-card controls. Business conformance remains **partial and unaccepted**. The browser run does not establish privacy conformance because both tabs used the same participant. The implementation roadmap is narrowed to recording these concrete remediation items and arranging a separately scoped fix/acceptance; no implementation was started as part of this audit.
+
+## Exact-release recheck — 2026-09-27
+
+The current repository source is `abf67bdaba4b1a14b644aafd353bda0454124142`, and the trusted deployment status reports web, realtime, and mail active and healthy at release `64ed823f4d671978`, all with matching desired and active source. An authenticated browser session was already signed in as `decks@mmanir.pl`; no credentials or email were submitted during this recheck.
+
+The earlier mouse pass's action history on the same disposable table records Freeze at revision 17, Unfreeze at 18, draw at 19, and hand reorder at 20. This confirms the previously recorded freeze recovery and hand reorder fixes against the current release. The current recheck then submitted an over-sized draw against the three-card deck; it was rejected without a durable revision. A one-card draw succeeded at revision 22, a second same-account tab shuffled the deck at revision 23, and Reset returned the table to the lobby at revision 24 with all three cards in the deck and none in hand. The fixture was left clean and unfrozen.
+
+The live table showed no other active participants. These results verify host freeze recovery, hand reordering, draw rejection/success, same-account realtime refresh, and reset recovery. They do not verify distinct-user authorization or private-hand isolation. The production smoke template still has only one card definition, so varied-artwork and crowded-table behavior remain unassessed. Leave the audit **partial and unaccepted** until the remaining distinct-participant, capability, visibility, concurrency, protected-art, and recovery cases are exercised.
