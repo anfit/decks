@@ -26,13 +26,16 @@ h1 { max-width: 24ch; margin: 0; font-size: clamp(1.9rem, 4vw, 3.2rem); line-hei
 .welcome.table-active > .eyebrow, .welcome.table-active > #welcome-title, .welcome.table-active > #welcome-description { display: none; }
 .welcome #workspace { display: grid; gap: .75rem; }
 .muted { color: #5c6872; line-height: 1.5; }
-.actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.5rem; }
-.selection-tools { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; width: 100%; }
+.actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .5rem; }
+.selection-tools { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; width: 100%; padding: .6rem; border: 1px solid #cbd5dc; border-radius: .5rem; background: #f8fafb; }
 button { border: 0; border-radius: .45rem; padding: .7rem 1rem; font: inherit; background: #1459a6; color: #fff; }
 button.secondary { background: #5c6872; }
 button:disabled { cursor: not-allowed; opacity: .65; }
 .status { min-height: 1.5rem; margin-bottom: 0; color: #1459a6; }
 .status[data-state="error"] { color: #9e2b2b; }
+.status-stack { display: grid; gap: .1rem; margin: .5rem 0 0; }
+.status-stack .status { min-height: 1.5rem; margin: 0; }
+.status-stack .status[hidden] { display: none; }
 .interaction-frozen { padding: .7rem .85rem; border: 1px solid #ad6e16; border-radius: .45rem; background: #fff2d8; color: #573809; }
 .panel { display: grid; gap: .65rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd5dc; border-radius: .6rem; background: #f8fafb; }
 .removed-card-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
@@ -59,7 +62,7 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .zone-row { display: grid; gap: .65rem; }
 .table-zone { position: absolute; display: flex; align-items: flex-start; pointer-events: none; border: 2px dashed #e4c35c; border-radius: .5rem; background: #fff4; }
 .table-zone span { margin: .25rem; padding: .12rem .35rem; border-radius: .25rem; background: #f8fafbE8; color: #1e2933; font-size: .75rem; font-weight: 700; }
-.table-view { display: grid; gap: .75rem; margin-top: 1.5rem; }
+.table-view { display: grid; gap: .75rem; margin-top: .5rem; }
 .table-view h3 { margin: .25rem 0; }
 .table-view, .table-surface { min-width: 0; }
 .table-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

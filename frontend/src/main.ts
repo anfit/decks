@@ -46,6 +46,8 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 
 const workspace = document.querySelector<HTMLElement>("#workspace");
 const status = document.querySelector<HTMLElement>("#connection-status");
+const actionFeedback = document.querySelector<HTMLElement>("#action-feedback");
+const selectionFeedback = document.querySelector<HTMLElement>("#selection-feedback");
 let csrf = "";
 let currentState: State | null = null;
 let socket: WebSocket | null = null;
@@ -60,12 +62,15 @@ const TABLE_ZOOM_STEP = 0.1;
 let tableZoom = 1;
 let tableScroll = { left: 0, top: 0 };
 const selectedCardIds = new Set<string>();
+const selectedCardVersions = new Map<string, number>();
 let selectionCountLabel: HTMLElement | null = null;
+let clearSelectionButton: HTMLButtonElement | null = null;
 let selectionActionButtons: HTMLButtonElement[] = [];
 let alignmentActionButtons: HTMLButtonElement[] = [];
 let singleSelectionActionButtons: HTMLButtonElement[] = [];
 let cardLockSelectionButtons: HTMLButtonElement[] = [];
 const selectedHandCardIds = new Set<string>();
+const selectedHandCardVersions = new Map<string, number>();
 let handSelectionCountLabel: HTMLElement | null = null;
 let handSelectionButtons: HTMLButtonElement[] = [];
 
@@ -73,6 +78,23 @@ function setStatus(message: string, state: "ok" | "error" | "pending" = "pending
   if (!status) return;
   status.textContent = message;
   status.dataset.state = state;
+}
+
+function setActionFeedback(message: string, state: "ok" | "error" = "error"): void {
+  if (!actionFeedback) return;
+  actionFeedback.textContent = message;
+  actionFeedback.dataset.state = state;
+  actionFeedback.hidden = message.length === 0;
+}
+
+function clearActionFeedback(): void {
+  setActionFeedback("", "ok");
+}
+
+function setSelectionFeedback(message: string): void {
+  if (!selectionFeedback) return;
+  selectionFeedback.textContent = message;
+  selectionFeedback.hidden = message.length === 0;
 }
 
 async function api(path: string, init: RequestInit = {}): Promise<any> {
@@ -417,6 +439,7 @@ function renderPileControls(state: State, pile: Pile): HTMLElement {
 
 function updateSelectionUi(): void {
   if (selectionCountLabel) selectionCountLabel.textContent = `${selectedCardIds.size} selected`;
+  if (clearSelectionButton) clearSelectionButton.disabled = selectedCardIds.size === 0;
   const selectedCards = selectedTableCards();
   const selectionCanChange = selectedCards.length === selectedCardIds.size && selectedCards.every((card) => !card.locked || card.locked_by_current);
   for (const item of selectionActionButtons) item.disabled = selectedCardIds.size === 0 || !selectionCanChange;
@@ -443,6 +466,41 @@ function updateHandSelectionUi(): void {
   });
 }
 
+function reconcileSelections(previousState: State | null, nextState: State): void {
+  if (!previousState || previousState.session.id !== nextState.session.id) {
+    selectedCardIds.clear(); selectedCardVersions.clear(); selectionMode = false;
+    selectedHandCardIds.clear(); selectedHandCardVersions.clear();
+    setSelectionFeedback(""); clearActionFeedback();
+    return;
+  }
+  if (!currentCan("card.manage")) {
+    const hadSelection = selectedCardIds.size > 0 || selectedHandCardIds.size > 0;
+    selectedCardIds.clear(); selectedCardVersions.clear(); selectionMode = false;
+    selectedHandCardIds.clear(); selectedHandCardVersions.clear();
+    if (hadSelection) setSelectionFeedback("Selection cleared because card actions are no longer available.");
+    return;
+  }
+  let invalidated = false;
+  const tableCards = new Map(nextState.cards.filter((card) => card.location_type === "table").map((card) => [card.id, card]));
+  for (const cardId of Array.from(selectedCardIds)) {
+    const card = tableCards.get(cardId);
+    if (!card || selectedCardVersions.get(cardId) !== card.version) {
+      selectedCardIds.delete(cardId); selectedCardVersions.delete(cardId); invalidated = true;
+    }
+  }
+  const participant = nextState.participants.find((item) => item.is_current);
+  const handCards = new Map(nextState.cards
+    .filter((card) => card.location_type === "hand" && card.hand_participant_id === participant?.id)
+    .map((card) => [card.id, card]));
+  for (const cardId of Array.from(selectedHandCardIds)) {
+    const card = handCards.get(cardId);
+    if (!card || selectedHandCardVersions.get(cardId) !== card.version) {
+      selectedHandCardIds.delete(cardId); selectedHandCardVersions.delete(cardId); invalidated = true;
+    }
+  }
+  if (invalidated) setSelectionFeedback("Some selections were cleared because a card changed, moved, or is no longer available.");
+}
+
 function selectionPayload(): { card_ids: string[]; expected_card_versions: Record<string, number> } {
   const cards: Card[] = [];
   for (const cardId of selectedCardIds) {
@@ -456,7 +514,6 @@ function applySelectedAction(type: string, values: Record<string, unknown>): voi
   if (!currentState || selectedCardIds.size === 0) return;
   const payload = { ...selectionPayload(), ...values };
   const sessionId = currentState.session.id;
-  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
   void action(sessionId, type, payload);
 }
 
@@ -467,7 +524,6 @@ function removeSelectedCard(): void {
   if (!window.confirm("Remove the selected card from play? The host can restore it later.")) return;
   const card = cards[0]!;
   const sessionId = currentState.session.id;
-  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
   void action(sessionId, "remove_card", { card_id: card.id, expected_card_version: card.version });
 }
 
@@ -491,7 +547,6 @@ function submitSelectedPositions(cards: Card[], positions: Array<{ x: number; y:
       z_index: card.z_index,
     };
   });
-  selectedCardIds.clear(); selectionMode = false; updateSelectionUi();
   void action(sessionId, "move_cards", { cards: items });
 }
 
@@ -714,14 +769,16 @@ function renderDeckControls(state: State, deck: Deck): HTMLElement {
 
 function renderTable(state: State): void {
   if (!workspace) return;
+  const previousState = currentState;
   const previousSurface = workspace.querySelector<HTMLElement>(".table-surface");
   if (previousSurface) tableScroll = { left: previousSurface.scrollLeft, top: previousSurface.scrollTop };
   const welcome = workspace.closest(".welcome");
   welcome?.classList.add("table-active"); welcome?.setAttribute("aria-labelledby", "table-title");
-  selectedCardIds.clear(); selectionMode = false;
-  selectionCountLabel = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = []; cardLockSelectionButtons = [];
-  selectedHandCardIds.clear(); handSelectionCountLabel = null; handSelectionButtons = [];
-  currentState = state; workspace.replaceChildren();
+  currentState = state;
+  reconcileSelections(previousState, state);
+  selectionCountLabel = null; clearSelectionButton = null; selectionActionButtons = []; alignmentActionButtons = []; singleSelectionActionButtons = []; cardLockSelectionButtons = [];
+  handSelectionCountLabel = null; handSelectionButtons = [];
+  workspace.replaceChildren();
   if (state.configuration.mat?.color) workspace.style.setProperty("--table-color", state.configuration.mat.color);
   const heading = document.createElement("h2"); heading.id = "table-title"; heading.textContent = state.session.title || "Untitled table"; workspace.append(heading);
   const tableCardCount = state.cards.filter((card) => card.location_type === "table").length;
@@ -740,10 +797,12 @@ function renderTable(state: State): void {
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
-  const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) workspace.append(capabilityPanel);
-  const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) workspace.append(removedCardPanel);
-  const zoneEditor = state.session.interaction_frozen ? null : renderZoneEditor(state); if (zoneEditor) workspace.append(zoneEditor);
-  const zoneLocks = state.session.interaction_frozen ? null : renderZoneLockControls(state); if (zoneLocks) workspace.append(zoneLocks);
+  renderBoard(state);
+  const adminPanels: HTMLElement[] = [];
+  const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) adminPanels.push(capabilityPanel);
+  const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) adminPanels.push(removedCardPanel);
+  const zoneEditor = state.session.interaction_frozen ? null : renderZoneEditor(state); if (zoneEditor) adminPanels.push(zoneEditor);
+  const zoneLocks = state.session.interaction_frozen ? null : renderZoneLockControls(state); if (zoneLocks) adminPanels.push(zoneLocks);
   const controls = document.createElement("div"); controls.className = "actions";
   controls.append(button("Refresh", () => void refreshTable(state.session.id), true));
   if (currentCan("lock.manage") && currentCan("session.manage") && state.session.status !== "ended" && (!state.session.interaction_frozen || state.session.locked)) {
@@ -761,18 +820,13 @@ function renderTable(state: State): void {
     }, true));
   }
   if (currentCan("card.manage") && state.session.status !== "ended" && !state.session.interaction_frozen) {
-    const selectCards = button("Select cards", () => {
-      selectionMode = !selectionMode;
-      selectedCardIds.clear();
-      selectCards.textContent = selectionMode ? "Finish selection" : "Select cards";
-      selectCards.setAttribute("aria-pressed", String(selectionMode));
-      surfaceSelectionMode(selectionMode);
-      updateSelectionUi();
-    }, true);
-    selectCards.setAttribute("aria-pressed", "false");
-    controls.append(selectCards);
     const selectionTools = document.createElement("div"); selectionTools.className = "selection-tools";
     selectionCountLabel = document.createElement("span"); selectionCountLabel.textContent = "0 selected"; selectionCountLabel.setAttribute("aria-live", "polite"); selectionTools.append(selectionCountLabel);
+    clearSelectionButton = button("Clear selection", () => {
+      selectedCardIds.clear(); selectedCardVersions.clear();
+      setSelectionFeedback(""); updateSelectionUi();
+    }, true);
+    clearSelectionButton.disabled = true; selectionTools.append(clearSelectionButton);
     const groupAction = (label: string, type: string, values: Record<string, unknown>): void => {
       const item = button(label, () => applySelectedAction(type, values), true); item.disabled = true; selectionActionButtons.push(item); selectionTools.append(item);
     };
@@ -830,7 +884,10 @@ function renderTable(state: State): void {
   workspace.append(controls);
   if (!state.session.interaction_frozen) for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
   workspace.append(renderRecentActions(state));
-  renderBoard(state);
+  for (const panel of adminPanels) workspace.append(panel);
+  surfaceSelectionMode(selectionMode);
+  updateSelectionUi();
+  updateHandSelectionUi();
   if (state.session.locked && !state.session.locked_by_current) {
     workspace.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
       if (["Refresh", "Unlock table", "Reset table", "Zoom in", "Zoom out", "Reset zoom"].includes(control.textContent?.trim() ?? "")) return;
@@ -890,6 +947,18 @@ function renderBoard(state: State): void {
   zoomIn = button("Zoom in", () => applyTableZoom(surface, tableZoom + TABLE_ZOOM_STEP, zoomLabel, zoomOut, zoomIn, resetZoom), true);
   resetZoom = button("Reset zoom", () => applyTableZoom(surface, 1, zoomLabel, zoomOut, zoomIn, resetZoom), true);
   zoomControls.append(navigationHint, zoomOut, zoomLabel, zoomIn, resetZoom);
+  if (canManageCards && state.session.status !== "ended") {
+    const selectCards = button(selectionMode ? "Finish selection" : "Select cards", () => {
+      selectionMode = !selectionMode;
+      selectCards.textContent = selectionMode ? "Finish selection" : "Select cards";
+      selectCards.setAttribute("aria-pressed", String(selectionMode));
+      setSelectionFeedback("");
+      surfaceSelectionMode(selectionMode);
+      updateSelectionUi();
+    }, true);
+    selectCards.setAttribute("aria-pressed", String(selectionMode));
+    zoomControls.append(selectCards);
+  }
   board.append(zoomControls);
   extent.style.width = `${boardWidth * tableZoom}px`;
   extent.style.height = `${boardHeight * tableZoom}px`;
@@ -898,6 +967,7 @@ function renderBoard(state: State): void {
   zoomLabel.value = `${Math.round(tableZoom * 100)}%`; zoomLabel.textContent = zoomLabel.value;
   zoomOut.disabled = tableZoom <= TABLE_ZOOM_MIN; zoomIn.disabled = tableZoom >= TABLE_ZOOM_MAX; resetZoom.disabled = tableZoom === 1;
   workspace.append(board);
+  surfaceSelectionMode(selectionMode);
   fitTableCanvas(surface);
   surface.scrollLeft = tableScroll.left; surface.scrollTop = tableScroll.top;
 
@@ -923,7 +993,9 @@ function renderBoard(state: State): void {
       select.setAttribute("aria-label", `Select hand card ${index + 1}${card.card_label ? `, ${card.card_label}` : ""}`);
       select.checked = selectedHandCardIds.has(card.id);
       select.addEventListener("change", () => {
-        if (select.checked) selectedHandCardIds.add(card.id); else selectedHandCardIds.delete(card.id);
+        if (select.checked) { selectedHandCardIds.add(card.id); selectedHandCardVersions.set(card.id, card.version); }
+        else { selectedHandCardIds.delete(card.id); selectedHandCardVersions.delete(card.id); }
+        setSelectionFeedback("");
         updateHandSelectionUi();
       });
       tools.append(selectLabel);
@@ -963,7 +1035,6 @@ function renderBoard(state: State): void {
       const give = button("Give selected cards", () => {
         const selected = versionPayload();
         if (selected.card_ids.length === 0) return;
-        selectedHandCardIds.clear(); updateHandSelectionUi();
         void action(state.session.id, "give_cards", { recipient_participant_id: recipient.value, ...selected });
       }, true);
       give.disabled = selectedHandCardIds.size === 0; handSelectionButtons.push(give); handActions.append(give);
@@ -973,7 +1044,6 @@ function renderBoard(state: State): void {
         const returnCards = button(label, () => {
           const selected = versionPayload();
           if (selected.card_ids.length === 0) return;
-          selectedHandCardIds.clear(); updateHandSelectionUi();
           void action(state.session.id, "return_to_source_decks", { position, ...selected });
         }, true);
         returnCards.disabled = selectedHandCardIds.size === 0; handSelectionButtons.push(returnCards); handActions.append(returnCards);
@@ -992,7 +1062,6 @@ function renderBoard(state: State): void {
           if (selected.card_ids.length === 0) return;
           const pile = unlockedPiles.find((candidate) => candidate.id === target.value);
           if (!pile) return;
-          selectedHandCardIds.clear(); updateHandSelectionUi();
           void action(state.session.id, "move_to_pile", { pile_id: pile.id, expected_pile_version: pile.version, ...selected });
         }, true);
         moveToPile.disabled = selectedHandCardIds.size === 0;
@@ -1150,14 +1219,18 @@ function renderCard(card: Card, index: number, inHand = false, interactive = tru
     item.addEventListener("click", (event) => {
       if (!selectionMode) return;
       event.preventDefault();
-      if (selectedCardIds.has(card.id)) selectedCardIds.delete(card.id); else selectedCardIds.add(card.id);
+      if (selectedCardIds.has(card.id)) { selectedCardIds.delete(card.id); selectedCardVersions.delete(card.id); }
+      else { selectedCardIds.add(card.id); selectedCardVersions.set(card.id, card.version); }
+      setSelectionFeedback("");
       updateSelectionUi();
     });
     item.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         if (selectionMode) {
-          if (selectedCardIds.has(card.id)) selectedCardIds.delete(card.id); else selectedCardIds.add(card.id);
+          if (selectedCardIds.has(card.id)) { selectedCardIds.delete(card.id); selectedCardVersions.delete(card.id); }
+          else { selectedCardIds.add(card.id); selectedCardVersions.set(card.id, card.version); }
+          setSelectionFeedback("");
           updateSelectionUi();
         } else if (!lockedForOther) void action(statefulSessionId(), "flip_card", { card_id: card.id, expected_card_version: card.version });
       }
@@ -1189,8 +1262,19 @@ function statefulSessionId(): string {
 }
 
 async function action(sessionId: string, type: string, payload: Record<string, unknown>): Promise<void> {
-  try { await api(`/api/sessions/${sessionId}/actions`, { method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), type, payload, expected_session_revision: currentState?.revision ?? null }) }); await refreshTable(sessionId); }
-  catch (error) { setStatus((error as Error).message, "error"); await refreshTable(sessionId); }
+  try {
+    await api(`/api/sessions/${sessionId}/actions`, { method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), type, payload, expected_session_revision: currentState?.revision ?? null }) });
+  } catch (error) {
+    setActionFeedback((error as Error).message, "error");
+    try { await refreshTable(sessionId); } catch { /* Keep the action error visible; connection state is reported separately. */ }
+    return;
+  }
+  try {
+    await refreshTable(sessionId);
+    clearActionFeedback();
+  } catch {
+    setActionFeedback("Action accepted, but the table could not refresh. Use Refresh to check its current state.", "error");
+  }
 }
 
 async function refreshTable(sessionId: string): Promise<void> { const result = await api(`/api/sessions/${sessionId}/state`); renderTable(result.state as State); }

@@ -478,8 +478,12 @@ header('Cache-Control: no-store');
           <p class="eyebrow">Decks</p>
           <h1 id="welcome-title">A shared table for physical card play.</h1>
           <p id="welcome-description" class="muted">Create a table or join one from an invitation.</p>
+          <div class="status-stack">
+            <p id="connection-status" class="status" role="status">Starting…</p>
+            <p id="action-feedback" class="status" role="status" aria-live="polite" hidden></p>
+            <p id="selection-feedback" class="status" role="status" aria-live="polite" hidden></p>
+          </div>
           <div id="workspace"></div>
-          <p id="connection-status" class="status">Starting…</p>
         </section>
       </main>
       <script type="module" src="/assets-build/<?= htmlspecialchars($entry, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"></script>
