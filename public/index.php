@@ -437,9 +437,15 @@ if (str_starts_with($path, '/api/')) {
             json_response($result);
         }
         json_response(['error' => 'not_found'], 404);
-    } catch (Throwable $exception) {
+    } catch (\PDOException $exception) {
+        error_log('Decks API database failure [' . (string) $exception->getCode() . ']');
+        json_response(['error' => 'internal_error', 'message' => 'The request could not be completed.'], 500);
+    } catch (RuntimeException $exception) {
         $status = str_contains(strtolower($exception->getMessage()), 'authentication') ? 401 : 409;
         json_response(['error' => 'request_rejected', 'message' => $exception->getMessage()], $status);
+    } catch (Throwable $exception) {
+        error_log('Decks API internal failure [' . get_class($exception) . ']');
+        json_response(['error' => 'internal_error', 'message' => 'The request could not be completed.'], 500);
     }
 }
 

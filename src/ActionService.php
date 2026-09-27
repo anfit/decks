@@ -336,7 +336,7 @@ final class ActionService
         $current = filter_var($session['interaction_frozen'], FILTER_VALIDATE_BOOLEAN);
         if ($current === $freeze) return ['session_id' => (string) $session['id'], 'interaction_frozen' => $freeze, '_no_change' => true];
         $database->prepare('UPDATE sessions SET interaction_frozen = :frozen WHERE id = :id')
-            ->execute(['frozen' => $freeze, 'id' => $session['id']]);
+            ->execute(['frozen' => $freeze ? 'true' : 'false', 'id' => $session['id']]);
         return ['session_id' => (string) $session['id'], 'interaction_frozen' => $freeze];
     }
 

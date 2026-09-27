@@ -581,6 +581,21 @@ class DecksContractTest(unittest.TestCase):
         for permitted in ("'unfreeze_table'", "'end_session'", "'reset_session'", "'remove_participant'", "'restore_participant'", "'set_participant_capabilities'", "'unlock_table'"):
             self.assertIn(permitted, allowed)
 
+    def test_freeze_boolean_binding_and_api_errors_are_safe(self) -> None:
+        action = read_text("src/ActionService.php")
+        routes = read_text("public/index.php")
+        spec = read_text("spec/04-actions.md")
+        self.assertIn("'frozen' => $freeze ? 'true' : 'false'", action)
+        database_catch = routes.index("catch (\\PDOException $exception)")
+        domain_catch = routes.index("catch (RuntimeException $exception)", database_catch)
+        unexpected_catch = routes.index("catch (Throwable $exception)", domain_catch)
+        self.assertLess(database_catch, domain_catch)
+        self.assertLess(domain_catch, unexpected_catch)
+        self.assertIn("error_log('Decks API database failure [' . (string) $exception->getCode() . ']')", routes)
+        self.assertIn("error_log('Decks API internal failure [' . get_class($exception) . ']')", routes)
+        self.assertIn("['error' => 'internal_error', 'message' => 'The request could not be completed.']", routes)
+        self.assertIn("return a generic server-error message rather than the exception text", spec)
+
     def test_php_release_migrates_transactionally_before_fpm_activation(self) -> None:
         entrypoint = read_text(".deployer/run.sh")
         migration = read_text("scripts/migrate.php")
