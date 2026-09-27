@@ -797,7 +797,11 @@ function renderTable(state: State): void {
   const players = document.createElement("ul"); players.className = "players";
   for (const participant of state.participants) { const row = document.createElement("li"); row.textContent = `${participant.is_current ? "You" : "Player"} · ${participant.role} · ${participant.hand_count} in hand`; players.append(row); }
   workspace.append(players);
-  renderBoard(state);
+  const playColumns = document.createElement("div"); playColumns.className = "play-columns";
+  const tableColumn = document.createElement("div"); tableColumn.className = "play-primary";
+  const actionColumn = document.createElement("aside"); actionColumn.className = "play-secondary"; actionColumn.setAttribute("aria-label", "Table actions");
+  playColumns.append(tableColumn, actionColumn); workspace.append(playColumns);
+  renderBoard(state, tableColumn);
   const adminPanels: HTMLElement[] = [];
   const capabilityPanel = renderParticipantControls(state); if (capabilityPanel) adminPanels.push(capabilityPanel);
   const removedCardPanel = renderRemovedCardControls(state); if (removedCardPanel) adminPanels.push(removedCardPanel);
@@ -881,8 +885,8 @@ function renderTable(state: State): void {
   }
   if (currentCan("pile.manage") && !state.session.interaction_frozen) controls.append(button("Create pile", () => void action(state.session.id, "create_pile", { label: "New pile", x: 24, y: 24 }), true));
   if (!state.session.interaction_frozen) for (const pile of state.containers.piles) controls.append(renderPileControls(state, pile));
-  workspace.append(controls);
-  if (!state.session.interaction_frozen) for (const deck of state.containers.decks) workspace.append(renderDeckControls(state, deck));
+  actionColumn.append(controls);
+  if (!state.session.interaction_frozen) for (const deck of state.containers.decks) actionColumn.append(renderDeckControls(state, deck));
   workspace.append(renderRecentActions(state));
   for (const panel of adminPanels) workspace.append(panel);
   surfaceSelectionMode(selectionMode);
@@ -907,7 +911,7 @@ function renderZoneOverlay(zone: Zone): HTMLElement {
   return overlay;
 }
 
-function renderBoard(state: State): void {
+function renderBoard(state: State, tableColumn: HTMLElement): void {
   if (!workspace) return;
   const board = document.createElement("section");
   board.className = "table-view";
@@ -966,7 +970,7 @@ function renderBoard(state: State): void {
   board.append(surface);
   zoomLabel.value = `${Math.round(tableZoom * 100)}%`; zoomLabel.textContent = zoomLabel.value;
   zoomOut.disabled = tableZoom <= TABLE_ZOOM_MIN; zoomIn.disabled = tableZoom >= TABLE_ZOOM_MAX; resetZoom.disabled = tableZoom === 1;
-  workspace.append(board);
+  tableColumn.append(board);
   surfaceSelectionMode(selectionMode);
   fitTableCanvas(surface);
   surface.scrollLeft = tableScroll.left; surface.scrollTop = tableScroll.top;

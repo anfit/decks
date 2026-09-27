@@ -127,5 +127,14 @@ label { display: grid; gap: .35rem; font-size: .9rem; }
 .asset-preview { grid-column: 1 / -1; width: 6rem; height: 7rem; padding: .25rem; border: 1px solid #cbd5dc; border-radius: .35rem; background: #f8fafb; object-fit: contain; }
 .template-form-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .template-feedback[role="alert"] { color: #9e2b2b; }
+/* Keep common mouse actions beside the tabletop on wide screens. */
+.play-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.play-primary, .play-secondary { min-width: 0; }
+.play-secondary { display: grid; align-content: start; gap: .75rem; }
+.play-secondary .actions, .play-secondary .panel { margin: 0; }
+@media (min-width: 64rem) {
+  .play-columns { grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); }
+  .play-secondary { position: sticky; top: .75rem; max-height: calc(100vh - 1.5rem); overflow-y: auto; overscroll-behavior: contain; }
+}
 @media (max-width: 600px) { .asset-picker { grid-template-columns: 1fr; } .template-form-actions button, .template-row button, .template-manager > button { min-height: 2.75rem; } }
 @media (max-width: 600px) { main { padding: 0; } .welcome { border-radius: 0; } .welcome.table-active { padding: .75rem; } .table-surface { height: 55vh; min-height: 16rem; } .card { width: 3.8rem; min-height: 5.3rem; } .table-pile { width: 8rem; } .table-pile-stack { width: 5.5rem; min-height: 6rem; } .table-navigation button, .actions button, .actions select, .pile-advanced-actions button, .pile-advanced-actions select, .table-pile-controls button { min-height: 2.75rem; } }
