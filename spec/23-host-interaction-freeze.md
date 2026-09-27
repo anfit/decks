@@ -6,6 +6,8 @@ Status: business requirements §5 and §20 interaction control.
 
 Only the active host with effective `session.manage` may run `freeze_table` or `unfreeze_table`. Both are serialized actions requiring the exact expected session revision; repeated requests that already match the state are idempotent and do not advance the revision. The authorized state projection exposes only `interaction_frozen: boolean`; public history records an allowlisted generic action type, never an actor id or private payload.
 
+The PHP-to-PostgreSQL write must serialize either state as an explicit PostgreSQL-compatible boolean value (`true` or `false`); it must not rely on implicit binding of PHP booleans.
+
 While frozen, all gameplay actions are rejected atomically before mutation, event insertion, idempotency completion, or revision advancement. Host session-administration and recovery actions remain available: unfreeze, participant administration/capability changes, whole-table unlock, reset, and end. Read-only requests, realtime reconnect, and leaving the session remain available. Joining remains governed by the ordinary session-token and participant-limit rules; new members receive the frozen flag and cannot mutate gameplay until the host unfreezes.
 
 Reset returns the session to its configured lobby state and clears the freeze. Ending leaves the ended session read-only under the existing lifecycle rules. Starting a session is only a configuration freeze and does not set `interaction_frozen`.

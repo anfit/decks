@@ -51,4 +51,4 @@ The table workspace renders a separate control group for every authorized sessio
 
 ## Error envelope
 
-HTTP errors use a stable JSON shape with `error`, `message`, `session_revision` where known, and an optional authorized `current` projection. Error messages do not include hidden card identities, private order, token secrets, SQL or filesystem paths.
+HTTP errors use a stable JSON shape with `error`, `message`, `session_revision` where known, and an optional authorized `current` projection. Error messages do not include hidden card identities, private order, token secrets, SQL or filesystem paths. Database and other unexpected internal exceptions return a generic server-error message rather than the exception text. Operational logs may record the exception class and database error code, but not the full exception message or bound parameters.
