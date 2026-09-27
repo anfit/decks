@@ -938,6 +938,7 @@ function renderBoard(state: State): void {
       const earlier = button(`Move hand card ${index + 1} earlier`, () => reorder(index - 1), true); earlier.disabled = index === 0;
       const later = button(`Move hand card ${index + 1} later`, () => reorder(index + 1), true); later.disabled = index === handCards.length - 1;
       tools.append(earlier, later);
+      slot.append(tools);
       const playDown = button("Play face down", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "down", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
       const playUp = button("Play face up", () => void action(state.session.id, "play_from_hand", { card_id: card.id, face_state: "up", x: 24 + index * 28, y: 24, expected_card_version: card.version }), true);
       item.append(playDown, playUp);

@@ -412,6 +412,7 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("expected_card_versions", frontend)
         self.assertIn('"reorder_hand"', frontend)
         self.assertIn('"give_cards"', frontend)
+        self.assertIn("slot.append(tools)", frontend)
         for label in ("Move hand card", "Give selected cards", "Return selected hand cards to source decks"):
             self.assertIn(label, frontend)
         self.assertIn("server-provided private hand order", ui_spec)
