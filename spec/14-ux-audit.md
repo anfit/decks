@@ -214,3 +214,29 @@ No new UX finding was established and no code, account, session, or email state 
 The current source (`01efa4f`) is now active and healthy across the web, realtime, and mail services. Production CSS and JavaScript match the local production build byte-for-byte; public `/`, `/health`, and `/login` checks pass, and syntactically valid unauthorized protected-asset routes return 404. These checks establish release and asset parity, not a visual UX review.
 
 The computer-use inventory still reports no browser or app, so sign-in and every rendered/interactive UX check remain unperformed. The audit remains **provisional**. Review the exact release with the browser and at least two participants at desktop and narrow/touch sizes, then verify account recovery, template create/upload/reorder/version flows, table setup/resume, populated card/pile operations, participant/lock/freeze states, artwork, keyboard/screen-reader behavior, pan/zoom/drag, and realtime mutation/reconnect. No new design or source gap is asserted from this checkpoint.
+
+## Mouse-focused production UX audit — 2026-09-25
+
+The internal browser opened the live revision-1 project context. An existing authenticated host session was already present; this pass did not re-enter credentials or reassess the sign-in form. A disposable three-card table was created and exercised with actual mouse input. The owner account was also opened in a second browser tab. Both tabs represented the same account, so this is not multi-participant usability or privacy acceptance.
+
+### Mouse actions observed
+
+- Dragging a card across the tabletop moved it. Double-clicking a face-down card turned it face up.
+- The “Select cards” mode and individual card targets allowed a two-card selection; the visible group rotate control rotated both cards successfully.
+- Mouse controls successfully drew to the table and hand, played a hand card face down, created a pile, collected cards, shuffled, split and merged piles, and shuffled a pile into a deck.
+- A second tab reflected the changed revision and card/pile counts without manual refresh. Selection in the first tab silently cleared when the second tab performed a deck shuffle.
+
+### Usability findings
+
+- **P0 — recovery and error clarity:** after the host froze the table, Unfreeze produced a raw PostgreSQL boolean error and left gameplay disabled. The frozen banner correctly explained read-only status, but the control offered no useful recovery guidance. A Reset confirmation then stalled browser automation; reset behavior was not verified.
+- **P1 — hand mouse controls:** a hand card displayed “Play face down/up”, but no visible per-card checkbox or reorder buttons appeared. The shared give/return/move-to-pile toolbar stayed disabled. The board's hand UI therefore looked interactive while several advertised operations had no usable selection path.
+- **P1 — moving target during play:** deck controls, table-wide selection controls, participant and zone administration, and the growing recent-action list precede the tabletop. In the observed 740×680 viewport, the player had to scroll past those sections to reach the board. New history entries changed content height and shifted the board's vertical position. There is no compact mode that keeps the current card actions near the board.
+- **P1 — selection stability:** a one-card selection disappeared when a different browser tab made an unrelated deck mutation. The user received no indication that the selection had been cleared.
+- **P2 — stale error feedback:** a failed draw correctly displayed “The deck does not contain enough cards.” Later successful pile and card actions left the old failure message visible, so current state looked unhealthy despite succeeding.
+- **P2 — action discoverability:** card dragging and double-click flipping worked, with their hints available as hover/accessibility descriptions. However, selection requires first enabling a global mode, then clicking each card, then using a separate toolbar far above the table. The mouse path is functional for table cards but has avoidable mode and travel costs.
+
+The current view provided a usable green tabletop and visible generic backs, but the smoke template contains too little varied artwork to assess real-deck scanning, front/back distinction at play size, or crowded-table behavior. Phone-width/touch, wheel/trackpad panning, zoom at non-default scale, lock edge cases, upload/reorder and screen-reader flows were not tested in this pass.
+
+### UX disposition
+
+The UX audit remains **provisional**, with direct evidence of the freeze-recovery failure, missing hand selection controls, selection loss during another client's update, stale errors and high scroll distance to the board. Prioritize a safe freeze recovery and error message, attach working hand controls, preserve or clearly invalidate selections on remote changes, clear resolved feedback, and reduce the distance between the tabletop and frequent actions. Follow with a distinct-user pass on a varied deck at desktop and phone widths, including drag, group selection, pan/zoom, locks and reset. No source change was made during this audit.

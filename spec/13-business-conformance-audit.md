@@ -264,3 +264,27 @@ The web release entrypoint completed its warning-rejecting PHP lint and checksum
 An implicit-TLS connection to `smtp.mail.ovh.net:465` accepted SMTP AUTH LOGIN using the configured operator credentials; the connection then quit cleanly. No `MAIL FROM`, recipient, message body or delivery was issued. The outbox count was zero before the worker restart. This verifies SMTP transport credentials, not sender-domain authentication or an invitation/password-reset delivery.
 
 The computer-use inventory still has no available browser or app. No account login, table mutation, two-participant privacy/concurrency flow, rendered UX review, or live realtime reconnect after a mutation was performed. The business result remains **partial and unaccepted** until those exact-release checks pass. The prior mutation-triggered reconnect failure remains unresolved by browser evidence; service health and a successful unauthenticated boundary probe do not prove session WebSocket behavior.
+
+## Authenticated production acceptance — 2026-09-25
+
+The revision-1 business source was opened in the internal browser and confirmed active at revision 1, with numbered sections 1–26. The production interaction used an already authenticated host account. A disposable table, `Mouse acceptance 2026-09-25`, was created from the existing Production smoke template v2. It instantiated three card instances from one definition. The interaction test used two browser tabs signed in as the same account; this verifies another same-account client view, not two distinct participants or privacy isolation.
+
+### Observed passes
+
+- Creating a table from a selected template and instantiating its deck worked.
+- Drawing two cards to the table advanced the revision and reduced the deck count. Drawing the bottom card to the owner's hand worked; playing it face down to the table worked.
+- Mouse dragging moved a table card. Double-click flipped it. Explicit multi-select selected two visible cards and the group rotate action succeeded.
+- Pile creation, collecting selected cards, pile shuffle, splitting into another pile, pile merge, and shuffle into deck worked. A second browser tab received the updated revision and state after mutations; the UI reported `Connected`.
+- Host freeze advanced the revision and the second tab displayed the frozen state.
+
+### Failures and unverified requirements
+
+- **P0 — host recovery:** the host's Unfreeze action failed with PostgreSQL `SQLSTATE[22P02]`, reporting invalid boolean input `""`. Revision 15 and the frozen state remained unchanged. `src/ActionService.php` passes PHP boolean `false` directly to a PostgreSQL boolean parameter; with the current PDO path it is sent as an empty string. `public/index.php` returns the database exception message in the user-facing `request_rejected` response. The supported Reset recovery was attempted, but the browser stalled on its confirmation interaction, so reset recovery was not verified. This violates the freeze/unfreeze and host-recovery contract in `spec/23-host-interaction-freeze.md` and blocks business acceptance.
+- **P1 — hand workflow:** a card could be played from the owner's hand, but the UI exposed no hand-card selection checkbox or reorder controls. The dependent give-to-player, return-to-source, and move-to-pile actions appeared disabled because no hand card could be selected. Those are required by business §§11 and 21, including private-hand operations in the minimum workflow. Source inspection confirms that the per-card `tools` container is created and populated but never appended to its card slot; the separate hand toolbar is appended, leaving its actions unusable.
+- **P1 — participant and privacy acceptance:** no distinct second account was available in this run. Spectator read-only behavior, cross-user private-hand projection, capability denial, participant leave/give, host transfer/removal, and protected artwork after membership/state changes remain unverified.
+- **P1 — synchronization and recovery:** a same-account second tab received live updates, but reconnect after a disconnect, stale-revision rejection between distinct actors, and recovery of in-progress selection across a remote update were not demonstrated. A remote deck shuffle changed the first tab from one selected card to zero selected cards.
+- Reset/end, collect-all modes, zone effects, card lock scopes, front/back artwork, template authoring, and persistent restore were not fully exercised in this browser pass. The failed draw-N request correctly left the revision unchanged and displayed an insufficient-cards message; that old error remained visible after later successful actions.
+
+### Updated conformance result
+
+The live release proves useful core table and pile workflows, but it **fails** the host-freeze recovery requirement and does not expose the required hand-card controls. Business conformance remains **partial and unaccepted**. The browser run does not establish privacy conformance because both tabs used the same participant. The implementation roadmap is narrowed to recording these concrete remediation items and arranging a separately scoped fix/acceptance; no implementation was started as part of this audit.
