@@ -316,6 +316,9 @@ final class CardService
             throw new RuntimeException('The hand changed; refresh and try again.');
         }
 
+        $temporaryOrder = $database->prepare('UPDATE session_cards SET order_key = :order WHERE id = :id');
+        foreach ($requested as $index => $id) $temporaryOrder->execute(['order' => -2000000000 + $index, 'id' => $id]);
+
         $update = $database->prepare('UPDATE session_cards SET order_key = :order, version = version + 1 WHERE id = :id');
         foreach ($requested as $index => $id) $update->execute(['order' => ($index + 1) * 1000, 'id' => $id]);
         self::bumpHand($database, $session['id'], (string) $member['id']);

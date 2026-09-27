@@ -427,6 +427,9 @@ class DecksContractTest(unittest.TestCase):
         self.assertIn("sort($ownedSet, SORT_STRING)", reorder)
         self.assertIn("sort($requestedSet, SORT_STRING)", reorder)
         self.assertIn("$requestedSet !== $ownedSet", reorder)
+        self.assertIn("$temporaryOrder = $database->prepare('UPDATE session_cards SET order_key = :order WHERE id = :id')", reorder)
+        self.assertIn("-2000000000 + $index", reorder)
+        self.assertIn("version = version + 1", reorder)
         self.assertIn("current hand exactly once", spec)
 
     def test_private_hand_selection_can_move_into_unlocked_pile_with_exact_versions(self) -> None:
